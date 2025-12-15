@@ -23,7 +23,7 @@ class EvaluationWorker(QueueConsumer):
     Worker that evaluates enriched signals using AI models.
 
     For Phase 1 (E2E skeleton), this creates stub decisions.
-    In later phases, this will call actual AI models (ChatGPT, Gemini).
+    In later phases, this will call actual AI models (ChatGPT, Gemini, Claude, DeepSeek).
     """
 
     STREAM = "lens:signals:enriched"
@@ -215,28 +215,40 @@ class EvaluationWorker(QueueConsumer):
         """
         signal_direction = payload.get("signal_direction", "LONG")
 
-        # Simulate different model personalities
-        if model_name == "chatgpt":
-            confidence = 0.75
-            decision = "FOLLOW_ENTER"
-        elif model_name == "gemini":
-            confidence = 0.68
-            decision = "FOLLOW_ENTER"
+        # Simulate different model personalities with varying confidence/behavior
+        model_configs = {
+            "chatgpt": {"confidence": 0.75, "decision": "FOLLOW_ENTER", "style": "aggressive"},
+            "gemini": {"confidence": 0.68, "decision": "FOLLOW_ENTER", "style": "balanced"},
+            "claude": {"confidence": 0.72, "decision": "FOLLOW_ENTER", "style": "conservative"},
+            "deepseek": {"confidence": 0.70, "decision": "FOLLOW_ENTER", "style": "analytical"},
+        }
+
+        config = model_configs.get(model_name, {"confidence": 0.60, "decision": "IGNORE", "style": "default"})
+        confidence = config["confidence"]
+        decision = config["decision"]
+        style = config["style"]
+
+        # Vary entry plan based on model style
+        if style == "aggressive":
+            entry_plan = {"type": "market"}
+        elif style == "conservative":
+            entry_plan = {"type": "limit", "offset_bps": -10}
         else:
-            confidence = 0.60
-            decision = "IGNORE"
+            entry_plan = {"type": "limit", "offset_bps": -5}
+
+        # Vary risk plan based on model style
+        if style == "conservative":
+            risk_plan = {"stop_method": "atr", "atr_multiple": 2.5}
+        elif style == "aggressive":
+            risk_plan = {"stop_method": "atr", "atr_multiple": 1.5}
+        else:
+            risk_plan = {"stop_method": "atr", "atr_multiple": 2.0}
 
         return {
             "decision": decision,
             "confidence": confidence,
-            "entry_plan": {
-                "type": "limit",
-                "offset_bps": -5,  # 5 bps below market for limit buy
-            },
-            "risk_plan": {
-                "stop_method": "atr",
-                "atr_multiple": 2.0,
-            },
+            "entry_plan": entry_plan,
+            "risk_plan": risk_plan,
             "size_pct": int(confidence * 20),  # Scale size with confidence
             "reasons": [
                 "bullish_trend" if signal_direction == "LONG" else "bearish_trend",
