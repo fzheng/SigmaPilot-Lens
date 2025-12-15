@@ -1,0 +1,60 @@
+# Feature Profile Configuration
+# Defines what market data and technical indicators to compute for each profile
+
+trend_follow_v1:
+  description: "Minimal trend-following indicators"
+  timeframes:
+    - "15m"
+    - "1h"
+    - "4h"
+  indicators:
+    - name: ema
+      params:
+        periods: [9, 21, 50]
+    - name: macd
+      params:
+        fast: 12
+        slow: 26
+        signal: 9
+    - name: rsi
+      params:
+        period: 14
+    - name: atr
+      params:
+        period: 14
+  market_data:
+    - mid_price
+    - spread_bps
+    - price_drift_from_entry
+  requires_derivs: false
+  requires_levels: false
+
+crypto_perps_v1:
+  description: "Crypto perpetuals with funding/OI context"
+  extends: trend_follow_v1
+  market_data:
+    - funding_rate
+    - predicted_funding
+    - open_interest
+    - oi_change_24h_pct
+    - mark_price
+    - oracle_price
+  requires_derivs: true
+  requires_levels: false
+
+full_v1:
+  description: "Full feature set with S/R levels and order book imbalance"
+  extends: crypto_perps_v1
+  indicators:
+    - name: support_resistance
+      params:
+        lookback: 100
+        sensitivity: 0.02
+        max_levels: 5
+    - name: order_book_imbalance
+      params:
+        depth_levels:
+          - 1   # 1% from mid
+          - 2   # 2% from mid
+          - 5   # 5% from mid
+  requires_levels: true

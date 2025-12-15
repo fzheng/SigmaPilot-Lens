@@ -1,0 +1,112 @@
+version: '3.8'
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lens-gateway
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://lens:${DB_PASSWORD:-lens}@postgres:5432/lens
+      - REDIS_URL=redis://redis:6379
+      - API_KEY_ADMIN=${API_KEY_ADMIN}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=json
+      - RATE_LIMIT_PER_MIN=${RATE_LIMIT_PER_MIN:-60}
+      - RATE_LIMIT_BURST=${RATE_LIMIT_BURST:-120}
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - lens-network
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lens-worker
+    restart: unless-stopped
+    command: python -m src.workers.main
+    environment:
+      - DATABASE_URL=postgresql://lens:${DB_PASSWORD:-lens}@postgres:5432/lens
+      - REDIS_URL=redis://redis:6379
+      - FEATURE_PROFILE=${FEATURE_PROFILE:-trend_follow_v1}
+      - TIMEFRAMES=${TIMEFRAMES:-15m,1h,4h}
+      - AI_MODELS=${AI_MODELS:-chatgpt,gemini}
+      - MODEL_CHATGPT_PROVIDER=openai
+      - MODEL_CHATGPT_API_KEY=${MODEL_CHATGPT_API_KEY}
+      - MODEL_CHATGPT_MODEL_ID=${MODEL_CHATGPT_MODEL_ID:-gpt-4o}
+      - MODEL_CHATGPT_TIMEOUT_MS=${MODEL_CHATGPT_TIMEOUT_MS:-30000}
+      - MODEL_CHATGPT_MAX_TOKENS=${MODEL_CHATGPT_MAX_TOKENS:-1000}
+      - MODEL_GEMINI_PROVIDER=google
+      - MODEL_GEMINI_API_KEY=${MODEL_GEMINI_API_KEY}
+      - MODEL_GEMINI_MODEL_ID=${MODEL_GEMINI_MODEL_ID:-gemini-1.5-pro}
+      - MODEL_GEMINI_TIMEOUT_MS=${MODEL_GEMINI_TIMEOUT_MS:-30000}
+      - MODEL_GEMINI_MAX_TOKENS=${MODEL_GEMINI_MAX_TOKENS:-1000}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=json
+      - RETRY_MAX=${RETRY_MAX:-5}
+      - DLQ_ENABLED=${DLQ_ENABLED:-true}
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - lens-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: lens-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - lens-network
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: lens-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=lens
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-lens}
+      - POSTGRES_DB=lens
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lens"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - lens-network
+
+volumes:
+  redis_data:
+  postgres_data:
+
+networks:
+  lens-network:
+    driver: bridge

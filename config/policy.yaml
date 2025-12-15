@@ -1,0 +1,42 @@
+# Trading Policy Configuration
+# Defines constraints applied during signal enrichment
+
+# Global defaults (applied to all symbols unless overridden)
+defaults:
+  # Minimum hold time before allowing close
+  min_hold_minutes: 15
+
+  # Only allow one direction at a time (no hedging)
+  one_direction_only: true
+
+  # Maximum trades per hour per symbol
+  max_trades_per_hour: 4
+
+  # Maximum position size as percentage of available
+  max_position_size_pct: 25
+
+  # Maximum leverage allowed
+  max_leverage: 10
+
+# Per-symbol overrides
+symbols:
+  BTC:
+    min_hold_minutes: 10
+    max_position_size_pct: 30
+    max_leverage: 20
+
+  ETH:
+    min_hold_minutes: 10
+    max_position_size_pct: 30
+    max_leverage: 20
+
+  SOL:
+    min_hold_minutes: 15
+    max_position_size_pct: 20
+    max_leverage: 10
+
+  # Example of a more conservative symbol
+  DOGE:
+    min_hold_minutes: 30
+    max_position_size_pct: 10
+    max_leverage: 5
