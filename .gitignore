@@ -239,3 +239,6 @@ dump.rdb
 
 # PostgreSQL
 *.sql.gz
+
+# Claude Code
+.claude/
