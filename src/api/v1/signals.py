@@ -1,18 +1,49 @@
 """Signal ingestion endpoints."""
 
+import time
 from datetime import datetime, timezone
-from typing import Annotated
+from typing import Annotated, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.deps import RateLimitedKey
+from src.core.config import settings
+from src.core.security import hash_api_key
+from src.models.database import get_db_session
+from src.models.orm.event import Event, ProcessingTimeline
 from src.models.schemas.signal import (
     SignalSubmitRequest,
     SignalSubmitResponse,
 )
+from src.observability.logging import get_logger, log_stage
+from src.observability.metrics import metrics
+from src.services.queue import get_queue_producer
+
+logger = get_logger(__name__)
 
 router = APIRouter()
+
+
+async def get_api_key_simple(
+    x_api_key: Annotated[Optional[str], Header(alias="X-API-Key")] = None,
+) -> str:
+    """Simple API key validation for Phase 1 (admin key only)."""
+    if not x_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"error": {"code": "UNAUTHORIZED", "message": "Missing X-API-Key header"}},
+        )
+
+    # For Phase 1, only accept the admin key
+    if x_api_key != settings.API_KEY_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"error": {"code": "UNAUTHORIZED", "message": "Invalid API key"}},
+        )
+
+    return x_api_key
 
 
 @router.post(
@@ -24,7 +55,9 @@ router = APIRouter()
 )
 async def submit_signal(
     signal: SignalSubmitRequest,
-    key_info: RateLimitedKey,
+    api_key: Annotated[str, Depends(get_api_key_simple)],
+    db: Annotated[AsyncSession, Depends(get_db_session)],
+    idempotency_key: Annotated[Optional[str], Header(alias="X-Idempotency-Key")] = None,
 ):
     """
     Submit a trading signal for analysis.
@@ -37,11 +70,95 @@ async def submit_signal(
 
     Returns the event_id for tracking.
     """
-    event_id = str(uuid4())
+    start_time = time.time()
     received_at = datetime.now(timezone.utc)
 
-    # TODO: Persist to database
-    # TODO: Enqueue to Redis Stream
+    # Check for idempotency
+    if idempotency_key:
+        existing = await db.execute(
+            select(Event).where(Event.idempotency_key == idempotency_key)
+        )
+        existing_event = existing.scalar_one_or_none()
+        if existing_event:
+            logger.info(f"Duplicate signal detected: {existing_event.event_id}")
+            return SignalSubmitResponse(
+                event_id=existing_event.event_id,
+                status=existing_event.status.upper(),
+                received_at=existing_event.received_at,
+            )
+
+    # Generate event ID
+    event_id = str(uuid4())
+
+    # Record metrics
+    metrics.record_signal_received(
+        source=signal.source,
+        symbol=signal.symbol,
+        event_type=signal.event_type,
+    )
+
+    # Log receipt
+    log_stage(logger, "RECEIVED", event_id, status="started", symbol=signal.symbol)
+
+    # Create event record
+    event = Event(
+        event_id=event_id,
+        idempotency_key=idempotency_key,
+        event_type=signal.event_type,
+        symbol=signal.symbol,
+        signal_direction=signal.signal_direction,
+        entry_price=float(signal.entry_price),
+        size=float(signal.size),
+        liquidation_price=float(signal.liquidation_price),
+        ts_utc=signal.ts_utc,
+        source=signal.source,
+        status="queued",
+        feature_profile=settings.FEATURE_PROFILE,
+        received_at=received_at,
+        raw_payload=signal.model_dump(mode="json"),
+    )
+
+    # Add to database
+    db.add(event)
+
+    # Add timeline entry
+    timeline_received = ProcessingTimeline(
+        event_id=event_id,
+        status="RECEIVED",
+        details={"source": signal.source},
+    )
+    db.add(timeline_received)
+
+    await db.commit()
+
+    # Enqueue to Redis Stream
+    try:
+        producer = get_queue_producer()
+        await producer.enqueue_signal(event_id, signal.model_dump(mode="json"))
+
+        # Add enqueued timeline entry
+        timeline_enqueued = ProcessingTimeline(
+            event_id=event_id,
+            status="ENQUEUED",
+        )
+        db.add(timeline_enqueued)
+        await db.commit()
+
+        log_stage(logger, "ENQUEUED", event_id, status="completed")
+
+    except Exception as e:
+        logger.error(f"Failed to enqueue signal {event_id}: {e}")
+        # Update event status to failed
+        event.status = "failed"
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": {"code": "QUEUE_ERROR", "message": "Failed to enqueue signal"}},
+        )
+
+    # Record enqueue metrics
+    duration = time.time() - start_time
+    metrics.record_signal_enqueued(signal.symbol, duration)
 
     return SignalSubmitResponse(
         event_id=event_id,

@@ -101,3 +101,23 @@ class RedisClient:
     async def xpending(self, stream: str, group: str) -> dict:
         """Get pending entries info."""
         return await self.client.xpending(stream, group)
+
+
+# Global producer instance (lazy initialization)
+_queue_producer = None
+
+
+def get_queue_producer():
+    """Get the global queue producer instance."""
+    global _queue_producer
+    if _queue_producer is None:
+        from src.services.queue.producer import QueueProducer
+        redis_client = get_redis_client()
+        _queue_producer = QueueProducer(RedisClient(redis_client))
+    return _queue_producer
+
+
+def reset_queue_producer():
+    """Reset the queue producer (for testing)."""
+    global _queue_producer
+    _queue_producer = None

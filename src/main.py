@@ -7,19 +7,57 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.v1.router import api_router
 from src.core.config import settings
+from src.models.database import close_db, init_db
+from src.observability.logging import get_logger, setup_logging
+from src.observability.metrics import metrics
+from src.services.queue import close_redis_client, init_redis_client, reset_queue_producer
+
+logger = get_logger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager for startup and shutdown events."""
     # Startup
-    # TODO: Initialize database connection pool
-    # TODO: Initialize Redis connection
-    # TODO: Start background workers if needed
+    setup_logging()
+    logger.info(f"Starting {settings.APP_NAME}")
+
+    # Initialize database connection pool
+    await init_db()
+    logger.info("Database connection pool initialized")
+
+    # Initialize Redis connection
+    await init_redis_client()
+    logger.info("Redis connection initialized")
+
+    # Set application info metrics
+    metrics.set_app_info(
+        version="0.1.0",
+        feature_profile=settings.FEATURE_PROFILE,
+        ai_models=settings.AI_MODELS,
+    )
+
+    logger.info(f"Feature profile: {settings.FEATURE_PROFILE}")
+    logger.info(f"AI models: {settings.ai_models_list}")
+    logger.info(f"WebSocket enabled: {settings.WS_ENABLED}")
+
     yield
+
     # Shutdown
-    # TODO: Close database connections
-    # TODO: Close Redis connections
+    logger.info("Shutting down...")
+
+    # Reset queue producer
+    reset_queue_producer()
+
+    # Close Redis connections
+    await close_redis_client()
+    logger.info("Redis connections closed")
+
+    # Close database connections
+    await close_db()
+    logger.info("Database connections closed")
+
+    logger.info("Shutdown complete")
 
 
 app = FastAPI(
@@ -45,22 +83,15 @@ app.add_middleware(
 app.include_router(api_router, prefix="/api/v1")
 
 
-@app.get("/health")
-async def health_check():
-    """Liveness probe endpoint."""
-    return {"status": "ok"}
-
-
-@app.get("/ready")
-async def readiness_check():
-    """Readiness probe endpoint."""
-    # TODO: Check database and Redis connectivity
+@app.get("/", include_in_schema=False)
+async def root():
+    """Root endpoint with API info."""
     return {
-        "status": "ready",
-        "dependencies": {
-            "redis": "ok",
-            "postgres": "ok",
-        },
+        "name": settings.APP_NAME,
+        "version": "0.1.0",
+        "docs": "/docs",
+        "health": "/api/v1/health",
+        "ready": "/api/v1/ready",
     }
 
 
