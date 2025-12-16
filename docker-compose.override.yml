@@ -1,0 +1,8 @@
+# Development overrides - exposes ports for local testing
+# This file is automatically loaded by docker-compose alongside docker-compose.yml
+# Do NOT commit this to production or use in production environments
+
+services:
+  gateway:
+    ports:
+      - "8000:8000"

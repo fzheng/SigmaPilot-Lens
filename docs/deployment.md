@@ -30,13 +30,15 @@ cp .env.example .env
 Edit `.env` with your configuration:
 
 ```bash
-# Required: Set admin API key
-API_KEY_ADMIN=your-secure-admin-key
-
-# Required: Set AI model API keys
+# Set AI model API keys
 MODEL_CHATGPT_API_KEY=sk-your-openai-key
 MODEL_GEMINI_API_KEY=your-google-ai-key
+
+# Database password (optional, defaults to 'lens')
+DB_PASSWORD=your-secure-db-password
 ```
+
+**Note**: SigmaPilot Lens uses network-level security. No API keys are required for authentication - all services are isolated within the Docker network.
 
 ### 3. Start Services
 
@@ -117,7 +119,6 @@ services:
     environment:
       - DATABASE_URL=postgresql://lens:${DB_PASSWORD}@postgres:5432/lens
       - REDIS_URL=redis://redis:6379
-      - API_KEY_ADMIN=${API_KEY_ADMIN}
       - LOG_LEVEL=INFO
       - LOG_FORMAT=json
     depends_on:
@@ -262,17 +263,18 @@ Create a `.env` file with production values:
 # Database
 DB_PASSWORD=your-secure-db-password
 
-# Authentication
-API_KEY_ADMIN=your-secure-admin-key
-
 # AI Models
-AI_MODELS=chatgpt,gemini
+AI_MODELS=chatgpt,gemini,claude,deepseek
 MODEL_CHATGPT_API_KEY=sk-your-openai-key
 MODEL_GEMINI_API_KEY=your-google-ai-key
+MODEL_CLAUDE_API_KEY=sk-ant-your-anthropic-key
+MODEL_DEEPSEEK_API_KEY=your-deepseek-key
 
 # Feature Profile
 FEATURE_PROFILE=trend_follow_v1
 ```
+
+**Note**: Network-level security is used instead of API keys. The API is only accessible from within the Docker network.
 
 ---
 
@@ -409,17 +411,16 @@ docker-compose logs -f gateway
 ### Pre-Deployment
 
 - [ ] Change default database password
-- [ ] Generate strong `API_KEY_ADMIN`
 - [ ] Secure AI provider API keys
 - [ ] Review rate limiting settings
-- [ ] Enable HTTPS (via reverse proxy)
+- [ ] Ensure docker-compose.override.yml is NOT used in production
 
 ### Network Security
 
-- [ ] Expose only necessary ports (8000)
-- [ ] Use internal network for Redis/Postgres
+- [ ] Verify no ports are exposed externally (production)
+- [ ] Use internal Docker network for all services
 - [ ] Configure firewall rules
-- [ ] Consider VPN for admin access
+- [ ] Consider VPN for accessing the Docker network
 
 ### Runtime Security
 

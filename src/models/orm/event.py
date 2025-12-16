@@ -32,7 +32,6 @@ class Event(Base):
     signal_direction: Mapped[str] = mapped_column(String(20), nullable=False)
     entry_price: Mapped[float] = mapped_column(Numeric(20, 8), nullable=False)
     size: Mapped[float] = mapped_column(Numeric(20, 8), nullable=False)
-    liquidation_price: Mapped[float] = mapped_column(Numeric(20, 8), nullable=False)
     ts_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     source: Mapped[str] = mapped_column(String(100), nullable=False)
 
@@ -52,11 +51,6 @@ class Event(Base):
 
     # Raw payload for audit
     raw_payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
-
-    # API key reference
-    api_key_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("api_keys.id"), nullable=True
-    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

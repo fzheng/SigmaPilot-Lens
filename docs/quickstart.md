@@ -38,23 +38,17 @@ cp .env.example .env
 
 ### 2. Edit Configuration
 
-Open `.env` and configure:
+Open `.env` and configure AI model API keys:
 
 ```bash
-# Required: Set a secure admin API key
-API_KEY_ADMIN=your-secure-random-key
-
-# Optional: Add AI model API keys (for Phase 2+)
+# Add AI model API keys (for Phase 2+)
 MODEL_CHATGPT_API_KEY=sk-...
 MODEL_GEMINI_API_KEY=...
 MODEL_CLAUDE_API_KEY=sk-ant-...
 MODEL_DEEPSEEK_API_KEY=...
 ```
 
-Generate a secure key:
-```bash
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-```
+**Note**: No API key authentication is required. SigmaPilot Lens uses network-level security - the API is only accessible from within the Docker network.
 
 ### 3. Start Services
 
@@ -161,15 +155,16 @@ alembic current
 
 ## Testing the API
 
-### Access Swagger UI
+### Access from Within Docker Network
 
-Open http://localhost:8000/docs in your browser for interactive API testing.
-
-### Submit a Test Signal
+The API is only accessible from within the Docker network. Use `docker-compose exec` to interact with the API:
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/signals \
-  -H "X-API-Key: YOUR_ADMIN_KEY" \
+# Health check
+docker-compose exec gateway curl http://localhost:8000/api/v1/health
+
+# Submit a test signal
+docker-compose exec gateway curl -X POST http://localhost:8000/api/v1/signals \
   -H "Content-Type: application/json" \
   -d '{
     "event_type": "OPEN_SIGNAL",
@@ -206,30 +201,9 @@ curl http://localhost:8000/api/v1/metrics
 
 ## WebSocket Testing
 
-### Using wscat
+WebSocket connections are also restricted to the Docker network.
 
-```bash
-# Install wscat
-npm install -g wscat
-
-# Connect
-wscat -c "ws://localhost:8000/api/v1/ws/stream?api_key=YOUR_ADMIN_KEY"
-
-# Subscribe to all decisions
-> {"action": "subscribe", "filters": {}}
-
-# Subscribe with filters
-> {"action": "subscribe", "filters": {"symbol": "BTC-PERP", "model": "chatgpt"}}
-
-# Ping/pong keepalive
-> {"type": "ping"}
-< {"type": "pong"}
-
-# Unsubscribe
-> {"action": "unsubscribe"}
-```
-
-### Using Python
+### From a Container Connected to lens-network
 
 ```python
 import asyncio
@@ -237,7 +211,8 @@ import websockets
 import json
 
 async def subscribe():
-    uri = "ws://localhost:8000/api/v1/ws/stream?api_key=YOUR_ADMIN_KEY"
+    # Connect to gateway from within Docker network
+    uri = "ws://gateway:8000/api/v1/ws/stream"
     async with websockets.connect(uri) as ws:
         # Subscribe
         await ws.send(json.dumps({
@@ -252,6 +227,23 @@ async def subscribe():
             print(f"Received: {decision}")
 
 asyncio.run(subscribe())
+```
+
+### WebSocket Messages
+
+```bash
+# Subscribe to all decisions
+{"action": "subscribe", "filters": {}}
+
+# Subscribe with filters
+{"action": "subscribe", "filters": {"symbol": "BTC-PERP", "model": "chatgpt"}}
+
+# Ping/pong keepalive
+{"type": "ping"}
+{"type": "pong"}
+
+# Unsubscribe
+{"action": "unsubscribe"}
 ```
 
 ## Troubleshooting

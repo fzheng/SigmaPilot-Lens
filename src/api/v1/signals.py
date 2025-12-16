@@ -10,7 +10,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
-from src.core.security import hash_api_key
 from src.models.database import get_db_session
 from src.models.orm.event import Event, ProcessingTimeline
 from src.models.schemas.signal import (
@@ -26,36 +25,15 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
-async def get_api_key_simple(
-    x_api_key: Annotated[Optional[str], Header(alias="X-API-Key")] = None,
-) -> str:
-    """Simple API key validation for Phase 1 (admin key only)."""
-    if not x_api_key:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": {"code": "UNAUTHORIZED", "message": "Missing X-API-Key header"}},
-        )
-
-    # For Phase 1, only accept the admin key
-    if x_api_key != settings.API_KEY_ADMIN:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": {"code": "UNAUTHORIZED", "message": "Invalid API key"}},
-        )
-
-    return x_api_key
-
-
 @router.post(
     "",
     response_model=SignalSubmitResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Submit a trading signal",
-    description="Submit a trading signal for AI analysis and evaluation.",
+    description="Submit a trading signal for AI analysis and evaluation. Access is restricted to internal Docker network only.",
 )
 async def submit_signal(
     signal: SignalSubmitRequest,
-    api_key: Annotated[str, Depends(get_api_key_simple)],
     db: Annotated[AsyncSession, Depends(get_db_session)],
     idempotency_key: Annotated[Optional[str], Header(alias="X-Idempotency-Key")] = None,
 ):
@@ -109,7 +87,6 @@ async def submit_signal(
         signal_direction=signal.signal_direction,
         entry_price=float(signal.entry_price),
         size=float(signal.size),
-        liquidation_price=float(signal.liquidation_price),
         ts_utc=signal.ts_utc,
         source=signal.source,
         status="queued",

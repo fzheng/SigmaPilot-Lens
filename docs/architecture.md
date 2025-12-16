@@ -21,7 +21,7 @@ SigmaPilot Lens follows an event-driven architecture with clear separation of co
 ┌──────────────┐          │  ┌────────────────────────────────────────────────────────────────────┐         │
 │              │          │  │                        PostgreSQL                                  │         │
 │  Downstream  │◀─────────│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ │         │
-│  Executors   │    WS    │  │  │ api_keys │ │  events  │ │ enriched │ │decisions │ │   dlq    │ │         │
+│  Executors   │    WS    │  │  │  events  │ │ enriched │ │decisions │ │   dlq    │ │  timeline│ │         │
 │              │          │  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘ │         │
 └──────────────┘          │  └────────────────────────────────────────────────────────────────────┘         │
                           │         ▲                                                                       │
@@ -42,16 +42,16 @@ SigmaPilot Lens follows an event-driven architecture with clear separation of co
 
 - FastAPI application with async request handling
 - Schema validation using Pydantic
-- API key authentication middleware
+- Network-level security (Docker network isolation)
 - Rate limiting (60 req/min, burst 120)
 - Assigns `event_id`, `received_ts`, and validates `source`
 
 **Endpoints**:
 - `POST /api/v1/signals` - Submit trading signal
-- `GET /api/v1/signals/{event_id}` - Get signal status
-- `POST /api/v1/keys` - Create API key (admin)
-- `GET /api/v1/keys` - List API keys (admin)
-- `DELETE /api/v1/keys/{key_id}` - Delete API key (admin)
+- `GET /api/v1/events` - List events
+- `GET /api/v1/events/{event_id}` - Get event details
+- `GET /api/v1/decisions` - List AI decisions
+- `GET /api/v1/health` - Health check
 
 ### 2. Redis Streams Queue
 
@@ -103,7 +103,7 @@ SigmaPilot Lens follows an event-driven architecture with clear separation of co
 
 - Plain WebSocket server
 - Subscription filters: model, symbol, event_type
-- Same API key authentication
+- Network-level security (Docker network isolation)
 - Broadcast to matching subscribers
 
 ### 6. PostgreSQL Storage
@@ -111,7 +111,6 @@ SigmaPilot Lens follows an event-driven architecture with clear separation of co
 **Responsibility**: Audit trail and queryable history
 
 **Tables**:
-- `api_keys` - API key management
 - `events` - Raw incoming signals
 - `enriched_events` - Enriched signal data
 - `model_decisions` - Per-model decisions
@@ -123,7 +122,7 @@ SigmaPilot Lens follows an event-driven architecture with clear separation of co
 ```
 1. Signal Received
    └─▶ Validate schema
-   └─▶ Authenticate API key
+   └─▶ Verify internal network
    └─▶ Rate limit check
    └─▶ Assign event_id, received_ts
    └─▶ Persist to events table
@@ -176,21 +175,21 @@ services:
 
 ## Security Model
 
-### Authentication
-- API key in `X-API-Key` header
-- Admin key for key management endpoints
-- Keys stored hashed in PostgreSQL
-- Expiration support
+### Network-Level Security
+- All services run inside isolated Docker network (`lens-network`)
+- No ports exposed to host machine in production
+- External requests rejected at application level
+- No API keys required - network isolation provides security
 
 ### Rate Limiting
-- Per-key rate limiting
+- Per-client rate limiting
 - Sliding window algorithm
 - Configurable limits via environment
 
-### Network
-- Internal services on private network
-- Only gateway exposed externally
-- WebSocket on separate port (optional)
+### Network Architecture
+- All services on private Docker network
+- Gateway, Redis, Postgres only accessible internally
+- Use `docker-compose.override.yml` to expose ports during development
 
 ## Observability
 

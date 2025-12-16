@@ -21,7 +21,6 @@ class TradingSignalEvent(BaseModel):
     )
     entry_price: Decimal = Field(..., gt=0, description="Entry price for the position")
     size: Decimal = Field(..., gt=0, description="Position size")
-    liquidation_price: Decimal = Field(..., gt=0, description="Liquidation price level")
     ts_utc: datetime = Field(..., description="Signal timestamp in UTC")
     source: str = Field(
         ..., min_length=1, max_length=100, description="Source identifier of the signal"
@@ -35,7 +34,6 @@ class TradingSignalEvent(BaseModel):
                 "signal_direction": "long",
                 "entry_price": 42000.50,
                 "size": 0.1,
-                "liquidation_price": 38000.00,
                 "ts_utc": "2024-01-15T10:30:00Z",
                 "source": "strategy_alpha",
             }
@@ -118,7 +116,6 @@ class EventDetailResponse(BaseModel):
     signal_direction: str
     entry_price: Decimal
     size: Decimal
-    liquidation_price: Decimal
     ts_utc: datetime
     source: str
     received_at: datetime

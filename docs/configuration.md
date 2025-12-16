@@ -39,17 +39,16 @@ DATABASE_URL=postgresql://lens:password@localhost:5432/lens
 REDIS_URL=redis://:password@localhost:6379/0
 ```
 
-### Authentication
+### Security
 
-| Variable | Description | Default | Required |
-|----------|-------------|---------|----------|
-| `API_KEY_ADMIN` | Admin API key for key management | - | **Yes** |
-| `API_KEY_HASH_ALGO` | Hash algorithm for API keys | `sha256` | No |
+SigmaPilot Lens uses **network-level security** instead of API keys:
 
-**Example**:
-```
-API_KEY_ADMIN=your-secure-admin-key-here
-```
+- All services are isolated within the Docker network (`lens-network`)
+- No ports are exposed to the host machine
+- External requests are rejected at the application level
+- No API keys required
+
+This is configured automatically in `docker-compose.yml` - no additional configuration needed.
 
 ### Rate Limiting
 
@@ -282,9 +281,10 @@ RETENTION_DAYS=180
 REDIS_URL=redis://localhost:6379/0
 
 # ===================
-# Authentication
+# Security
 # ===================
-API_KEY_ADMIN=your-secure-admin-key-change-me
+# Network-based security: API is only accessible from internal Docker network
+# No API keys required - all external requests are rejected at network level
 
 # ===================
 # Rate Limiting

@@ -19,20 +19,6 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # API Keys table
-    op.create_table(
-        'api_keys',
-        sa.Column('id', postgresql.UUID(as_uuid=True), primary_key=True, server_default=sa.text('gen_random_uuid()')),
-        sa.Column('name', sa.String(255), nullable=False),
-        sa.Column('key_hash', sa.String(255), nullable=False, unique=True),
-        sa.Column('key_prefix', sa.String(16), nullable=False),
-        sa.Column('is_admin', sa.Boolean(), default=False),
-        sa.Column('expires_at', sa.DateTime(timezone=True), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()')),
-        sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True),
-    )
-    op.create_index('idx_api_keys_key_hash', 'api_keys', ['key_hash'])
-
     # Events table
     op.create_table(
         'events',
@@ -44,7 +30,6 @@ def upgrade() -> None:
         sa.Column('signal_direction', sa.String(20), nullable=False),
         sa.Column('entry_price', sa.Numeric(20, 8), nullable=False),
         sa.Column('size', sa.Numeric(20, 8), nullable=False),
-        sa.Column('liquidation_price', sa.Numeric(20, 8), nullable=False),
         sa.Column('ts_utc', sa.DateTime(timezone=True), nullable=False),
         sa.Column('source', sa.String(100), nullable=False),
         sa.Column('status', sa.String(20), nullable=False, server_default='queued'),
@@ -54,7 +39,6 @@ def upgrade() -> None:
         sa.Column('evaluated_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('published_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('raw_payload', postgresql.JSONB(), nullable=False),
-        sa.Column('api_key_id', postgresql.UUID(as_uuid=True), sa.ForeignKey('api_keys.id'), nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()')),
     )
     op.create_index('idx_events_event_id', 'events', ['event_id'])
@@ -159,4 +143,3 @@ def downgrade() -> None:
     op.drop_table('model_decisions')
     op.drop_table('enriched_events')
     op.drop_table('events')
-    op.drop_table('api_keys')

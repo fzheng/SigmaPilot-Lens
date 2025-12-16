@@ -5,7 +5,6 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Query
 
-from src.api.deps import VerifiedKey
 from src.models.schemas.signal import EventListResponse, EventDetailResponse
 
 router = APIRouter()
@@ -15,10 +14,9 @@ router = APIRouter()
     "",
     response_model=EventListResponse,
     summary="List events",
-    description="Retrieve a list of submitted events with optional filters.",
+    description="Retrieve a list of submitted events with optional filters. Access is restricted to internal Docker network only.",
 )
 async def list_events(
-    key_info: VerifiedKey,
     symbol: Optional[str] = Query(None, description="Filter by symbol"),
     event_type: Optional[str] = Query(None, description="Filter by event type"),
     source: Optional[str] = Query(None, description="Filter by source"),
@@ -46,11 +44,10 @@ async def list_events(
     "/{event_id}",
     response_model=EventDetailResponse,
     summary="Get event details",
-    description="Retrieve full details of a specific event including timeline and decisions.",
+    description="Retrieve full details of a specific event including timeline and decisions. Access is restricted to internal Docker network only.",
 )
 async def get_event(
     event_id: str,
-    key_info: VerifiedKey,
 ):
     """
     Get full details of an event.
@@ -68,11 +65,10 @@ async def get_event(
 @router.get(
     "/{event_id}/status",
     summary="Get event status",
-    description="Get the current processing status of an event.",
+    description="Get the current processing status of an event. Access is restricted to internal Docker network only.",
 )
 async def get_event_status(
     event_id: str,
-    key_info: VerifiedKey,
 ):
     """
     Get the current processing status of an event.

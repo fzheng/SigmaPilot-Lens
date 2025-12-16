@@ -16,6 +16,17 @@ Signal → Queue → Enrichment → AI Evaluation → WebSocket
                 PostgreSQL (Audit)
 ```
 
+## Security Model
+
+SigmaPilot Lens uses **network-level security**:
+
+- All services run inside an isolated Docker network (`lens-network`)
+- **No ports are exposed to the host machine** - the API is only accessible from within the Docker network
+- No API keys required - network isolation provides security
+- External requests are rejected at the application level
+
+This design is ideal for single-tenant deployments where the API is consumed by other containers in the same Docker network.
+
 ## Quick Start
 
 ### Prerequisites
@@ -29,42 +40,62 @@ Signal → Queue → Enrichment → AI Evaluation → WebSocket
 git clone https://github.com/fzheng/SigmaPilot-Lens.git
 cd SigmaPilot-Lens
 cp .env.example .env
-# Edit .env to set API_KEY_ADMIN and AI model API keys
+# Edit .env to add AI model API keys
 
-# Start all services
+# Build and start
+make build
+make up
+make migrate
+```
+
+### Make Commands
+
+| Command | Description |
+|---------|-------------|
+| `make build` | Build Docker images |
+| `make rebuild` | Clean rebuild (removes volumes, builds, starts, migrates) |
+| `make up` | Start all services |
+| `make down` | Stop all services |
+| `make logs` | Follow logs |
+| `make test` | Run all tests |
+| `make test-unit` | Run unit tests only |
+| `make migrate` | Run database migrations |
+| `make clean` | Remove all containers and volumes |
+
+Or use docker-compose directly:
+
+```bash
 docker-compose up -d
-
-# Run migrations
 docker-compose exec gateway alembic upgrade head
-
-# View logs
 docker-compose logs -f
 ```
 
-### Access Points
+### Internal Access
 
-| Service | URL |
-|---------|-----|
-| Swagger UI | http://localhost:8000/docs |
-| ReDoc | http://localhost:8000/redoc |
-| Health Check | http://localhost:8000/api/v1/health |
-| WebSocket | ws://localhost:8000/api/v1/ws/stream |
+The API is only accessible from within the Docker network:
+
+```bash
+# Health check (from host via docker exec)
+docker-compose exec gateway curl http://localhost:8000/api/v1/health
+
+# From another container on lens-network
+curl http://gateway:8000/api/v1/health
+```
 
 ## Usage
 
-### Submit a Signal
+### Submit a Signal (from internal container)
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/signals \
-  -H "X-API-Key: YOUR_ADMIN_KEY" \
+# From a container connected to lens-network
+curl -X POST http://gateway:8000/api/v1/signals \
   -H "Content-Type: application/json" \
   -d '{
     "event_type": "OPEN_SIGNAL",
     "symbol": "BTC-PERP",
-    "signal_direction": "LONG",
+    "signal_direction": "long",
     "entry_price": 50000.00,
     "size": 1.0,
-    "liquidation_price": 45000.00,
     "ts_utc": "2025-01-15T10:30:00Z",
     "source": "my-strategy"
   }'
@@ -73,7 +104,8 @@ curl -X POST http://localhost:8000/api/v1/signals \
 ### Subscribe to Decisions (WebSocket)
 
 ```javascript
-const ws = new WebSocket('ws://localhost:8000/api/v1/ws/stream?api_key=YOUR_KEY');
+// From a client connected to the Docker network
+const ws = new WebSocket('ws://gateway:8000/api/v1/ws/stream');
 
 ws.onopen = () => {
   ws.send(JSON.stringify({
@@ -89,15 +121,32 @@ ws.onmessage = (event) => {
 };
 ```
 
+### Connect Another Service
+
+To connect another container to the Lens network:
+
+```yaml
+# In your docker-compose.yml
+services:
+  my-service:
+    image: my-image
+    networks:
+      - sigmapilot-lens_lens-network
+
+networks:
+  sigmapilot-lens_lens-network:
+    external: true
+```
+
 ## Configuration
 
 Key settings in `.env`:
 
 | Variable | Description |
 |----------|-------------|
-| `API_KEY_ADMIN` | Admin API key (required) |
 | `AI_MODELS` | Enabled models: `chatgpt,gemini,claude,deepseek` |
 | `FEATURE_PROFILE` | Enrichment profile: `trend_follow_v1` |
+| `DB_PASSWORD` | PostgreSQL password |
 
 See [Configuration Guide](docs/configuration.md) for all options.
 

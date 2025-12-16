@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.v1.router import api_router
+from src.core.network import InternalNetworkMiddleware
 from src.core.config import settings
 from src.models.database import close_db, init_db
 from src.observability.logging import get_logger, setup_logging
@@ -70,10 +71,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Internal network restriction middleware (must be added first - outermost)
+app.add_middleware(InternalNetworkMiddleware)
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=["*"],  # Only internal network can access anyway
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

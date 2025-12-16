@@ -4,12 +4,11 @@ import asyncio
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Set
+from typing import Dict, List
 from uuid import uuid4
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from src.core.security import hash_api_key
 from src.observability.logging import get_logger
 from src.observability.metrics import metrics
 
@@ -22,7 +21,6 @@ class Subscription:
 
     id: str
     websocket: WebSocket
-    api_key_hash: str
     filters: Dict[str, str] = field(default_factory=dict)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -49,17 +47,12 @@ class WebSocketManager:
         self.subscriptions: Dict[str, Subscription] = {}
         self._lock = asyncio.Lock()
 
-    async def connect(
-        self,
-        websocket: WebSocket,
-        api_key: str,
-    ) -> str:
+    async def connect(self, websocket: WebSocket) -> str:
         """
         Accept a new WebSocket connection.
 
         Args:
             websocket: FastAPI WebSocket instance
-            api_key: Authenticated API key
 
         Returns:
             Subscription ID
@@ -70,7 +63,6 @@ class WebSocketManager:
         subscription = Subscription(
             id=sub_id,
             websocket=websocket,
-            api_key_hash=hash_api_key(api_key),
         )
 
         async with self._lock:
@@ -229,18 +221,14 @@ class WebSocketManager:
 ws_manager = WebSocketManager()
 
 
-async def handle_websocket(
-    websocket: WebSocket,
-    api_key: str,
-) -> None:
+async def handle_websocket(websocket: WebSocket) -> None:
     """
     Handle a WebSocket connection lifecycle.
 
     Args:
         websocket: FastAPI WebSocket instance
-        api_key: Authenticated API key
     """
-    sub_id = await ws_manager.connect(websocket, api_key)
+    sub_id = await ws_manager.connect(websocket)
 
     try:
         while True:

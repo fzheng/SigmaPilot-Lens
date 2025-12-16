@@ -5,7 +5,6 @@ from typing import Optional
 
 from fastapi import APIRouter, Query
 
-from src.api.deps import VerifiedKey
 from src.models.schemas.decision import DecisionListResponse, DecisionDetailResponse
 
 router = APIRouter()
@@ -15,10 +14,9 @@ router = APIRouter()
     "",
     response_model=DecisionListResponse,
     summary="List decisions",
-    description="Query AI model decisions with optional filters.",
+    description="Query AI model decisions with optional filters. Access is restricted to internal Docker network only.",
 )
 async def list_decisions(
-    key_info: VerifiedKey,
     model: Optional[str] = Query(None, description="Filter by model name"),
     symbol: Optional[str] = Query(None, description="Filter by symbol"),
     event_type: Optional[str] = Query(None, description="Filter by event type"),
@@ -48,11 +46,10 @@ async def list_decisions(
     "/{decision_id}",
     response_model=DecisionDetailResponse,
     summary="Get decision details",
-    description="Retrieve full details of a specific decision.",
+    description="Retrieve full details of a specific decision. Access is restricted to internal Docker network only.",
 )
 async def get_decision(
     decision_id: str,
-    key_info: VerifiedKey,
 ):
     """
     Get full details of a decision.

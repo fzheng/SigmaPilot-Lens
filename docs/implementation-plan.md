@@ -50,16 +50,16 @@ Phase 1 is DONE only when:
 ### 1.3 Phase 1 Implementation Tasks
 
 #### 1.3.1 Database Setup
-- [ ] Create initial Alembic migration with all tables
-- [ ] Verify tables: events, enriched_events, model_decisions, processing_timeline, dlq_entries, api_keys
-- [ ] Add indexes for event_id, symbol, status, received_at
+- [x] Create initial Alembic migration with all tables
+- [x] Verify tables: events, enriched_events, model_decisions, processing_timeline, dlq_entries
+- [x] Add indexes for event_id, symbol, status, received_at
 
 #### 1.3.2 Gateway (Minimal)
-- [ ] `POST /api/v1/signals` - Accept signal, validate schema, assign event_id
-- [ ] Simple API key check (admin key only for Phase 1)
-- [ ] Persist to `events` table with status='queued'
-- [ ] Enqueue to Redis Stream `lens:signals:pending`
-- [ ] Return event_id
+- [x] `POST /api/v1/signals` - Accept signal, validate schema, assign event_id
+- [x] Network-level security (Docker network isolation)
+- [x] Persist to `events` table with status='queued'
+- [x] Enqueue to Redis Stream `lens:signals:pending`
+- [x] Return event_id
 
 #### 1.3.3 Redis Queue
 - [ ] Initialize Redis Stream and consumer group on startup
@@ -109,25 +109,17 @@ Phase 1 is DONE only when:
 
 ## Phase 2: Signal Gateway (Production-Ready)
 
-**Goal**: Harden the gateway with proper authentication, rate limiting, and error handling.
+**Goal**: Harden the gateway with rate limiting and error handling.
 
-### 2.1 API Key Management
-- [ ] `POST /api/v1/keys` - Create new API key (admin only)
-- [ ] `GET /api/v1/keys` - List keys
-- [ ] `DELETE /api/v1/keys/{key_id}` - Revoke key
-- [ ] Key hashing with SHA-256
-- [ ] Expiration support
+### 2.1 Security (Completed)
+- [x] Network-level security via Docker network isolation
+- [x] No API keys required - all services internal only
+- [x] External requests rejected at application level
 
-### 2.2 Authentication Middleware
-- [ ] Validate `X-API-Key` header on all endpoints
-- [ ] Look up key in database
-- [ ] Check expiration and deleted status
-- [ ] Return 401 for invalid/missing keys
-
-### 2.3 Rate Limiting
+### 2.2 Rate Limiting
 - [ ] Redis-based sliding window limiter
 - [ ] 60 req/min, burst 120
-- [ ] Per-key rate limiting
+- [ ] Per-client rate limiting
 - [ ] Return 429 with Retry-After header
 
 ### 2.4 Idempotency
@@ -285,10 +277,10 @@ Phase 1 is DONE only when:
 - [ ] `POST /api/v1/dlq/{id}/retry` - Retry DLQ entry
 
 ### 5.4 WebSocket Enhancement
-- [ ] Subscription filters (model, symbol, event_type)
-- [ ] API key authentication
-- [ ] Ping/pong heartbeat
-- [ ] Connection limits
+- [x] Subscription filters (model, symbol, event_type)
+- [x] Network-level security (Docker network isolation)
+- [x] Ping/pong heartbeat
+- [x] Connection limits
 
 ### 5.5 Performance Testing
 - [ ] Load test script (target: 60 signals/min sustained)

@@ -33,8 +33,9 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
     REDIS_MAX_CONNECTIONS: int = 10
 
-    # Authentication
-    API_KEY_ADMIN: str = Field(..., description="Admin API key")
+    # Security
+    # Network-level security is used instead of API keys
+    # All services are isolated within Docker network
 
     # Rate Limiting
     RATE_LIMIT_PER_MIN: int = 60

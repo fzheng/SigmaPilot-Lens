@@ -1,20 +1,14 @@
 # API Reference
 
-Base URL: `http://localhost:8000/api/v1`
+Base URL: `http://gateway:8000/api/v1` (from within Docker network)
 
-All endpoints require authentication via the `X-API-Key` header unless otherwise noted.
+## Security
 
----
+**Network-Level Security**: All endpoints are protected by network isolation. Only requests from within the Docker network (`lens-network`) are accepted.
 
-## Authentication
-
-All API requests must include an API key:
-
-```
-X-API-Key: your-api-key
-```
-
-Admin endpoints require an admin API key (configured via `API_KEY_ADMIN` environment variable).
+- No API keys required
+- External requests are rejected with `403 Forbidden`
+- Health endpoints (`/health`, `/ready`) are accessible for Docker health checks
 
 ---
 
@@ -31,8 +25,8 @@ POST /signals
 **Headers**:
 | Header | Required | Description |
 |--------|----------|-------------|
-| `X-API-Key` | Yes | API key |
 | `Content-Type` | Yes | `application/json` |
+| `X-Idempotency-Key` | No | Prevent duplicate processing |
 
 **Request Body**:
 ```json
@@ -72,12 +66,12 @@ POST /signals
 }
 ```
 
-`401 Unauthorized` - Invalid API key:
+`403 Forbidden` - External network access:
 ```json
 {
   "error": {
-    "code": "UNAUTHORIZED",
-    "message": "Invalid or missing API key"
+    "code": "FORBIDDEN",
+    "message": "Access denied. This API is only accessible from internal network."
   }
 }
 ```
@@ -305,216 +299,30 @@ GET /decisions/{decision_id}
 
 ---
 
-## API Keys (Admin)
-
-These endpoints require the admin API key.
-
-### Create API Key
-
-Create a new API key.
-
-```
-POST /keys
-```
-
-**Request Body**:
-```json
-{
-  "name": "executor-1",
-  "expires_at": "2025-01-15T00:00:00Z"
-}
-```
-
-**Response** `201 Created`:
-```json
-{
-  "id": "key-001",
-  "name": "executor-1",
-  "key": "lens_k1_xxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-  "key_prefix": "lens_k1_",
-  "expires_at": "2025-01-15T00:00:00Z",
-  "created_at": "2024-01-15T10:30:00Z"
-}
-```
-
-> **Note**: The full `key` is only returned on creation. Store it securely.
-
-### List API Keys
-
-List all API keys.
-
-```
-GET /keys
-```
-
-**Query Parameters**:
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `include_expired` | bool | false | Include expired keys |
-| `include_deleted` | bool | false | Include deleted keys |
-
-**Response** `200 OK`:
-```json
-{
-  "items": [
-    {
-      "id": "key-001",
-      "name": "executor-1",
-      "key_prefix": "lens_k1_",
-      "is_admin": false,
-      "expires_at": "2025-01-15T00:00:00Z",
-      "created_at": "2024-01-15T10:30:00Z",
-      "deleted_at": null
-    }
-  ]
-}
-```
-
-### Get API Key
-
-Get details of a specific API key.
-
-```
-GET /keys/{key_id}
-```
-
-**Response** `200 OK`:
-```json
-{
-  "id": "key-001",
-  "name": "executor-1",
-  "key_prefix": "lens_k1_",
-  "is_admin": false,
-  "expires_at": "2025-01-15T00:00:00Z",
-  "created_at": "2024-01-15T10:30:00Z",
-  "deleted_at": null,
-  "usage": {
-    "requests_24h": 150,
-    "last_used_at": "2024-01-15T10:29:00Z"
-  }
-}
-```
-
-### Delete API Key
-
-Revoke an API key.
-
-```
-DELETE /keys/{key_id}
-```
-
-**Response** `204 No Content`
-
----
-
-## Dead Letter Queue (Admin)
-
-### List DLQ Entries
-
-List failed processing entries.
-
-```
-GET /dlq
-```
-
-**Query Parameters**:
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `stage` | string | - | Filter by stage (ENRICHMENT, EVALUATION) |
-| `error_code` | string | - | Filter by error code |
-| `since` | datetime | - | Entries after this time |
-| `limit` | int | 50 | Max results (1-100) |
-| `offset` | int | 0 | Pagination offset |
-
-**Response** `200 OK`:
-```json
-{
-  "items": [
-    {
-      "id": "dlq-001",
-      "event_id": "550e8400-e29b-41d4-a716-446655440000",
-      "stage": "ENRICHMENT",
-      "error_code": "PROVIDER_ERROR",
-      "error_message": "Hyperliquid API returned 503",
-      "retry_count": 5,
-      "created_at": "2024-01-15T10:30:15.000Z"
-    }
-  ],
-  "total": 5,
-  "limit": 50,
-  "offset": 0
-}
-```
-
-### Get DLQ Entry
-
-Get details of a DLQ entry including full payload.
-
-```
-GET /dlq/{dlq_id}
-```
-
-**Response** `200 OK`:
-```json
-{
-  "id": "dlq-001",
-  "event_id": "550e8400-e29b-41d4-a716-446655440000",
-  "stage": "ENRICHMENT",
-  "error_code": "PROVIDER_ERROR",
-  "error_message": "Hyperliquid API returned 503",
-  "payload": { /* original message */ },
-  "retry_count": 5,
-  "created_at": "2024-01-15T10:30:15.000Z"
-}
-```
-
-### Retry DLQ Entry
-
-Retry processing a DLQ entry.
-
-```
-POST /dlq/{dlq_id}/retry
-```
-
-**Response** `202 Accepted`:
-```json
-{
-  "event_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "REQUEUED"
-}
-```
-
----
-
 ## Health & Metrics
 
 ### Health Check
 
-Liveness probe.
+Liveness probe. Accessible from any IP (for Docker health checks).
 
 ```
 GET /health
 ```
 
-**Authentication**: Not required
-
 **Response** `200 OK`:
 ```json
 {
-  "status": "ok",
-  "timestamp": "2024-01-15T10:30:00Z"
+  "status": "ok"
 }
 ```
 
 ### Readiness Check
 
-Readiness probe with dependency checks.
+Readiness probe with dependency checks. Accessible from any IP.
 
 ```
 GET /ready
 ```
-
-**Authentication**: Not required
 
 **Response** `200 OK`:
 ```json
@@ -548,8 +356,6 @@ Prometheus metrics endpoint.
 GET /metrics
 ```
 
-**Authentication**: Not required
-
 **Response**: Prometheus text format
 
 ---
@@ -558,13 +364,10 @@ GET /metrics
 
 ### Connect
 
-```
-ws://localhost:8000/ws/decisions?api_key=your-key
-```
+From within the Docker network:
 
-Or with header:
 ```
-X-API-Key: your-key
+ws://gateway:8000/api/v1/ws/stream
 ```
 
 ### Messages
@@ -630,8 +433,7 @@ X-API-Key: your-key
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
 | `VALIDATION_ERROR` | 400 | Invalid request body or parameters |
-| `UNAUTHORIZED` | 401 | Invalid or missing API key |
-| `FORBIDDEN` | 403 | Insufficient permissions |
+| `FORBIDDEN` | 403 | Access denied (external network) |
 | `NOT_FOUND` | 404 | Resource not found |
 | `RATE_LIMITED` | 429 | Rate limit exceeded |
 | `INTERNAL_ERROR` | 500 | Internal server error |
