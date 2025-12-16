@@ -25,6 +25,11 @@ class MetricsCollector:
             "Total signals enqueued",
             ["symbol"],
         )
+        self.signals_rejected = Counter(
+            "lens_signals_rejected_total",
+            "Total signals rejected before enrichment",
+            ["symbol", "reason"],
+        )
         self.signals_enriched = Counter(
             "lens_signals_enriched_total",
             "Total signals enriched",
@@ -158,6 +163,17 @@ class MetricsCollector:
         """Record a signal enqueued."""
         self.signals_enqueued.labels(symbol=symbol).inc()
         self.enqueue_duration.observe(duration_seconds)
+
+    def record_signal_rejected(self, symbol: str, reason: str):
+        """Record a signal rejected before enrichment."""
+        # Normalize reason to a short label (e.g., "price_drift", "signal_too_old")
+        if "drift" in reason.lower():
+            reason_label = "price_drift"
+        elif "old" in reason.lower() or "age" in reason.lower():
+            reason_label = "signal_too_old"
+        else:
+            reason_label = "other"
+        self.signals_rejected.labels(symbol=symbol, reason=reason_label).inc()
 
     def record_enrichment(self, profile: str, symbol: str, duration_seconds: float):
         """Record enrichment completion."""

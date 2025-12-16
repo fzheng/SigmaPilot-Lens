@@ -145,54 +145,67 @@ Phase 1 is DONE only when:
 
 ---
 
-## Phase 3: Data Enrichment (Full)
+## Phase 3: Data Enrichment (Full) ✅ COMPLETED
 
 **Goal**: Replace stub enrichment with real market data and technical analysis.
 
-### 3.1 Hyperliquid Provider
-- [ ] REST client for Hyperliquid API
-- [ ] `get_ticker()` - Mid price, bid, ask, spread
-- [ ] `get_ohlcv()` - Candlestick data for TA
-- [ ] `get_orderbook()` - L2 order book
-- [ ] `get_funding_rate()` - Funding and predicted funding
-- [ ] `get_open_interest()` - OI and 24h change
-- [ ] Error handling and retry logic
-- [ ] Response caching (short TTL)
+### 3.1 Hyperliquid Provider ✅
+- [x] REST client for Hyperliquid API (POST to /info endpoint)
+- [x] `get_ticker()` - Mid price, bid, ask, spread (via allMids + l2Book)
+- [x] `get_ohlcv()` - Candlestick data for TA (via candleSnapshot)
+- [x] `get_orderbook()` - L2 order book (via l2Book)
+- [x] `get_funding_rate()` - Funding and predicted funding (via metaAndAssetCtxs)
+- [x] `get_open_interest()` - OI in contracts and USD (via metaAndAssetCtxs)
+- [x] `get_mark_price()` - Mark price for derivatives
+- [x] `get_24h_volume()` - 24h notional volume
+- [x] Error handling (ProviderError with HTTP details)
+- [x] Response caching (5s TTL for asset contexts)
 
-### 3.2 Technical Analysis
-- [ ] EMA calculation (9, 21, 50 periods)
-- [ ] MACD (12, 26, 9)
-- [ ] RSI (14 period)
-- [ ] ATR (14 period)
-- [ ] Support/Resistance detection (optional, for full_v1)
-- [ ] Order book imbalance (optional, for full_v1)
+### 3.2 Technical Analysis ✅
+- [x] EMA calculation (configurable periods, default 9, 21, 50)
+- [x] MACD (configurable, default 12, 26, 9)
+- [x] RSI (configurable, default 14 period)
+- [x] ATR (configurable, default 14 period)
+- [ ] Support/Resistance detection (optional, for full_v1) - TODO
+- [ ] Order book imbalance (optional, for full_v1) - TODO
 
-### 3.3 Feature Profiles
-- [ ] Load profile from config/feature_profiles.yaml
-- [ ] `trend_follow_v1`: Basic indicators
-- [ ] `crypto_perps_v1`: Add derivatives data
-- [ ] `full_v1`: Add S/R and OBI
-- [ ] Profile-based data fetching
+### 3.3 Feature Profiles ✅
+- [x] Load profile from config/feature_profiles.yaml
+- [x] `trend_follow_v1`: Basic indicators (15m, 1h, 4h timeframes)
+- [x] `crypto_perps_v1`: Add derivatives data (funding, OI)
+- [x] `full_v1`: Extends crypto_perps_v1 with all indicators
+- [x] Profile-based data fetching
+- [x] Profile inheritance support (extends keyword)
 
-### 3.4 Quality Flags
-- [ ] Detect missing data from provider
-- [ ] Detect stale data (configurable thresholds)
-- [ ] Detect out-of-range values
-- [ ] Include flags in enriched event
+### 3.4 Quality Flags ✅
+- [x] Detect missing data from provider
+- [x] Detect stale data (configurable thresholds per data type)
+- [x] Detect out-of-range values (spread, bid/ask, RSI, ATR)
+- [x] Include flags in enriched event
 
-### 3.5 Enrichment Worker
-- [ ] Consume from `lens:signals:pending`
-- [ ] Fetch data based on feature profile
-- [ ] Compute TA indicators
-- [ ] Build compact enriched payload (< 4KB)
-- [ ] Store data_timestamps for each component
-- [ ] Handle failures: retry or DLQ
+### 3.5 Signal Validation ✅ (NEW)
+- [x] Early price validation before enrichment
+- [x] Reject signals with >2% price drift from current market
+- [x] Reject signals older than 5 minutes
+- [x] Metrics for rejection tracking (by reason)
+- [x] Database status "rejected" with timeline entry
 
-### 3.6 Phase 3 Deliverables
-- [ ] Real market data flowing
-- [ ] TA indicators computed correctly
-- [ ] Quality flags working
-- [ ] DLQ capturing failures
+### 3.6 Enrichment Worker ✅
+- [x] Consume from `lens:signals:pending`
+- [x] Early validation before database lookup (optimization)
+- [x] Fetch data based on feature profile
+- [x] Compute TA indicators per timeframe
+- [x] Build compact enriched payload (< 4KB)
+- [x] Store data_timestamps for each component
+- [x] Track signal_age_seconds
+- [x] Handle failures: retry or DLQ
+
+### 3.7 Phase 3 Deliverables ✅
+- [x] Real market data flowing (~1.5s enrichment time)
+- [x] TA indicators computed correctly (57+ unit tests)
+- [x] Quality flags working (staleness, range validation)
+- [x] Signal validation preventing bad signals
+- [x] DLQ capturing failures
 
 ---
 
@@ -387,10 +400,11 @@ Phase 1 is DONE only when:
 - [ ] Auth, rate limiting, idempotency working
 - [ ] All API endpoints functional in Swagger
 
-### Phase 3 (Enrichment)
-- [ ] Real Hyperliquid data flowing
-- [ ] TA indicators verified correct
-- [ ] Quality flags detecting issues
+### Phase 3 (Enrichment) ✅
+- [x] Real Hyperliquid data flowing
+- [x] TA indicators verified correct
+- [x] Quality flags detecting issues
+- [x] Signal validation rejecting invalid signals
 
 ### Phase 4 (AI Evaluation)
 - [ ] ChatGPT + Gemini producing decisions

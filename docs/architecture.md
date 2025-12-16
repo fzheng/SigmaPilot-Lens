@@ -70,17 +70,25 @@ SigmaPilot Lens follows an event-driven architecture with clear separation of co
 
 ### 3. Enrichment Worker
 
-**Responsibility**: Fetch market data and compute technical features
+**Responsibility**: Validate signals and enrich with market data
 
+**Signal Validation** (before enrichment):
+- Early price validation: Rejects signals with >2% price drift from current market
+- Signal age validation: Rejects signals older than 5 minutes
+- Optimization: Age check runs first (no API call needed)
+- Rejected signals marked with status="rejected" in database
+
+**Enrichment Flow**:
 - Consumes from `lens:signals:pending`
+- Validates signal entry price against live market
 - Fetches data from Hyperliquid (primary provider)
 - Computes TA indicators based on feature profile
 - Produces to `lens:signals:enriched`
 - Handles provider failures with retry logic
 
 **Feature Profiles**:
-- `trend_follow_v1` - EMA, MACD, RSI, ATR (minimal)
-- `crypto_perps_v1` - Above + funding, OI, mark price
+- `trend_follow_v1` - EMA, MACD, RSI, ATR across 15m/1h/4h timeframes
+- `crypto_perps_v1` - Above + funding rate, OI, mark price
 - `full_v1` - Above + support/resistance, OBI, order flow
 
 ### 4. AI Evaluation Engine
@@ -125,20 +133,28 @@ SigmaPilot Lens follows an event-driven architecture with clear separation of co
    └─▶ Verify internal network
    └─▶ Rate limit check
    └─▶ Assign event_id, received_ts
-   └─▶ Persist to events table
+   └─▶ Persist to events table (status=received)
    └─▶ Enqueue to Redis (lens:signals:pending)
    └─▶ Return event_id to caller
 
-2. Enrichment
+2. Signal Validation (early rejection)
+   └─▶ Check signal age (>5 min = reject, no API call)
+   └─▶ Fetch current price from Hyperliquid
+   └─▶ Calculate drift: |current - entry| / entry
+   └─▶ If drift > 2%: reject signal, skip enrichment
+   └─▶ Update events.status = 'rejected' with reason
+   └─▶ Log rejection for metrics
+
+3. Enrichment (if validation passes)
    └─▶ Consume from lens:signals:pending
    └─▶ Fetch market data (Hyperliquid)
-   └─▶ Compute TA indicators
-   └─▶ Add quality flags
-   └─▶ Persist enriched data
+   └─▶ Compute TA indicators per timeframe
+   └─▶ Add quality flags (staleness, missing data)
+   └─▶ Persist enriched data with signal_age_seconds
    └─▶ Enqueue to lens:signals:enriched
    └─▶ On failure: retry or DLQ
 
-3. AI Evaluation
+4. AI Evaluation
    └─▶ Consume from lens:signals:enriched
    └─▶ Load prompts for configured models
    └─▶ Call models in parallel
@@ -146,7 +162,7 @@ SigmaPilot Lens follows an event-driven architecture with clear separation of co
    └─▶ Persist decisions
    └─▶ Trigger publish
 
-4. Publishing
+5. Publishing
    └─▶ Match decision to subscriptions
    └─▶ Broadcast via WebSocket
    └─▶ Log publish confirmation
@@ -194,13 +210,15 @@ services:
 ## Observability
 
 ### Metrics (Prometheus)
-- `lens_signals_received_total`
-- `lens_signals_enqueued_total`
-- `lens_enrichment_duration_seconds`
-- `lens_model_evaluation_duration_seconds`
-- `lens_decisions_published_total`
-- `lens_dlq_entries_total`
-- `lens_queue_depth`
+- `lens_signals_received_total` - Signals received by source/symbol
+- `lens_signals_enqueued_total` - Signals enqueued to Redis
+- `lens_signals_rejected_total` - Signals rejected (by reason: price_drift, signal_too_old)
+- `lens_signals_enriched_total` - Signals successfully enriched
+- `lens_enrichment_duration_seconds` - Enrichment latency histogram
+- `lens_model_evaluation_duration_seconds` - AI model latency histogram
+- `lens_decisions_published_total` - Decisions published via WebSocket
+- `lens_dlq_entries_total` - Failed processing records
+- `lens_queue_depth` - Current queue depth gauge
 
 ### Logging
 - Structured JSON logs

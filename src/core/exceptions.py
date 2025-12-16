@@ -124,3 +124,16 @@ class TimeoutError(LensException):
             code="TIMEOUT",
             details=[{"operation": operation, "timeout_ms": timeout_ms}],
         )
+
+
+class SignalRejectedError(LensException):
+    """Raised when a signal is rejected before enrichment."""
+
+    def __init__(self, reason: str, symbol: str, details: dict = None):
+        super().__init__(
+            message=f"Signal rejected for {symbol}: {reason}",
+            code="SIGNAL_REJECTED",
+            details=[{"symbol": symbol, "reason": reason, **(details or {})}],
+        )
+        self.reason = reason
+        self.symbol = symbol
