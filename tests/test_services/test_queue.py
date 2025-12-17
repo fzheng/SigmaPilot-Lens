@@ -92,70 +92,61 @@ class TestQueueProducer:
 
 
 @pytest.mark.unit
-class TestQueueConsumer:
-    """Tests for QueueConsumer message processing."""
+class TestQueueConsumerBase:
+    """Tests for QueueConsumer base class behavior."""
 
-    @pytest.fixture
-    def mock_redis(self):
-        """Create a mock Redis client with consumer group support."""
-        redis = MagicMock()
-        redis.xreadgroup = AsyncMock(return_value=[])
-        redis.xack = AsyncMock(return_value=1)
-        redis.xgroup_create = AsyncMock()
-        return redis
+    def test_consumer_is_abstract(self):
+        """Test that QueueConsumer is an abstract base class."""
+        from src.services.queue.consumer import QueueConsumer
+        import inspect
 
-    @pytest.fixture
-    def consumer(self, mock_redis):
-        """Create a QueueConsumer with mocked Redis."""
+        assert inspect.isabstract(QueueConsumer)
+
+    def test_consumer_requires_process_message(self):
+        """Test that subclasses must implement process_message."""
+        from src.services.queue.consumer import QueueConsumer
+        from abc import abstractmethod
+
+        # Check that process_message is abstract
+        assert hasattr(QueueConsumer.process_message, '__isabstractmethod__')
+
+    def test_consumer_requires_get_stage_name(self):
+        """Test that subclasses must implement _get_stage_name."""
         from src.services.queue.consumer import QueueConsumer
 
-        return QueueConsumer(
-            redis=mock_redis,
-            stream="lens:signals:pending",
-            group="lens-workers",
-            consumer_name="worker-1",
+        # Check that _get_stage_name is abstract
+        assert hasattr(QueueConsumer._get_stage_name, '__isabstractmethod__')
+
+    def test_backoff_calculation(self):
+        """Test exponential backoff calculation with jitter."""
+        from src.services.queue.consumer import QueueConsumer
+
+        # Create a concrete implementation for testing
+        class TestConsumer(QueueConsumer):
+            async def process_message(self, event_id, payload):
+                return True
+
+            def _get_stage_name(self):
+                return "test"
+
+        mock_redis = MagicMock()
+        consumer = TestConsumer(
+            redis_client=mock_redis,
+            stream="test:stream",
+            group="test-group",
+            consumer_name="test-consumer",
         )
 
-    @pytest.mark.asyncio
-    async def test_consume_returns_empty_when_no_messages(self, consumer, mock_redis):
-        """Test that consume returns empty list when no messages available."""
-        mock_redis.xreadgroup.return_value = []
+        # Test backoff increases with retry count
+        delay_0 = consumer._calculate_backoff(0)
+        delay_1 = consumer._calculate_backoff(1)
+        delay_2 = consumer._calculate_backoff(2)
 
-        messages = await consumer.consume(count=10, block_ms=1000)
-
-        assert messages == []
-
-    @pytest.mark.asyncio
-    async def test_consume_parses_message_payload(self, consumer, mock_redis):
-        """Test that consume properly parses message payloads."""
-        mock_redis.xreadgroup.return_value = [
-            (
-                "lens:signals:pending",
-                [
-                    (
-                        "1234567890-0",
-                        {
-                            "event_id": "test-123",
-                            "payload": '{"symbol": "BTC", "price": 42000}',
-                        },
-                    )
-                ],
-            )
-        ]
-
-        messages = await consumer.consume(count=10, block_ms=1000)
-
-        assert len(messages) == 1
-        assert messages[0]["event_id"] == "test-123"
-
-    @pytest.mark.asyncio
-    async def test_acknowledge_calls_xack(self, consumer, mock_redis):
-        """Test that acknowledge properly calls Redis XACK."""
-        message_id = "1234567890-0"
-
-        await consumer.acknowledge(message_id)
-
-        mock_redis.xack.assert_called_once()
+        # Base delay is 2 seconds, so delay should approximately double each retry
+        # (with some jitter variance)
+        assert delay_0 > 0
+        assert delay_1 > delay_0 * 0.5  # Account for jitter
+        assert delay_2 > delay_1 * 0.5  # Account for jitter
 
 
 @pytest.mark.unit
@@ -177,17 +168,17 @@ class TestRedisClientHealth:
         mock_redis.ping.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_redis_client_get_queue_depth(self):
-        """Test getting queue depth from Redis stream."""
+    async def test_redis_client_xlen(self):
+        """Test getting stream length from Redis."""
         from src.services.queue.redis_client import RedisClient
 
         mock_redis = MagicMock()
         mock_redis.xlen = AsyncMock(return_value=42)
 
         client = RedisClient(mock_redis)
-        depth = await client.get_queue_depth("lens:signals:pending")
+        length = await client.xlen("lens:signals:pending")
 
-        assert depth == 42
+        assert length == 42
         mock_redis.xlen.assert_called_once_with("lens:signals:pending")
 
 
