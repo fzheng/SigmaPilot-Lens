@@ -1,6 +1,7 @@
 """Prompt loading and rendering for AI models."""
 
 import hashlib
+import json
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -58,8 +59,6 @@ class PromptLoader:
         Returns:
             Tuple of (rendered_prompt, prompt_version, prompt_hash)
         """
-        import json
-
         # Load prompts
         core_prompt = self.load_core_prompt(core_version)
         wrapper_prompt = self.load_wrapper_prompt(model_name, wrapper_version)

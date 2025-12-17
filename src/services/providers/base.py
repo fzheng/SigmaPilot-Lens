@@ -156,6 +156,10 @@ class MarketDataProvider(ABC):
         """
         Check provider connectivity.
 
+        This method is available for readiness probes and health checks.
+        Currently not used in the main flow but can be integrated into
+        /ready endpoint or startup checks if needed.
+
         Returns:
             True if provider is healthy
         """

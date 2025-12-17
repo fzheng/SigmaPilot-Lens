@@ -1,6 +1,6 @@
 """Hyperliquid market data provider."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -292,7 +292,6 @@ class HyperliquidProvider(MarketDataProvider):
         now = datetime.now(timezone.utc)
         next_hour = now.replace(minute=0, second=0, microsecond=0)
         if next_hour <= now:
-            from datetime import timedelta
             next_hour = next_hour + timedelta(hours=1)
 
         return FundingRate(

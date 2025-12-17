@@ -97,7 +97,7 @@ SigmaPilot Lens follows an event-driven architecture with clear separation of co
 **Feature Profiles**:
 - `trend_follow_v1` - EMA, MACD, RSI, ATR across 15m/1h/4h timeframes
 - `crypto_perps_v1` - Above + funding rate, OI, mark price
-- `full_v1` - Above + support/resistance, OBI, order flow
+- `full_v1` - Above + support/resistance, OBI (S/R and OBI not yet implemented)
 
 ### 4. AI Evaluation Engine
 
