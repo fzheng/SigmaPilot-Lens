@@ -302,10 +302,29 @@ async def retry_dlq_entry(
 
         elif entry.stage == "publish":
             # Re-publish via WebSocket
-            from src.services.publisher import get_publisher
-            publisher = get_publisher()
+            from src.services.publisher import publisher
+            from src.models.schemas.decision import ModelDecision, ModelMeta
             if entry.event_id:
-                await publisher.publish(entry.event_id, entry.payload)
+                # Reconstruct decision from payload
+                payload = entry.payload
+                decision = ModelDecision(
+                    decision=payload.get("decision", "IGNORE"),
+                    confidence=payload.get("confidence", 0.0),
+                    reasons=payload.get("reasons", ["retry"]),
+                    model_meta=ModelMeta(
+                        model_name=payload.get("model", "unknown"),
+                        model_version=payload.get("model_version", "unknown"),
+                        latency_ms=0,
+                        status="RETRY",
+                    ),
+                )
+                await publisher.publish_decision(
+                    event_id=entry.event_id,
+                    symbol=payload.get("symbol", "UNKNOWN"),
+                    event_type=payload.get("event_type", "OPEN_SIGNAL"),
+                    model=payload.get("model", "unknown"),
+                    decision=decision,
+                )
             else:
                 raise ValueError("No event_id for publish retry")
 

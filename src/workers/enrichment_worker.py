@@ -185,7 +185,7 @@ class EnrichmentWorker(QueueConsumer):
 
     def _get_stage_name(self) -> str:
         """Get the stage name for DLQ entries."""
-        return "enrichment"
+        return "enrich"
 
     async def _mark_rejected(self, event_id: str, error: SignalRejectedError) -> None:
         """

@@ -599,7 +599,7 @@ class EvaluationWorker(QueueConsumer):
 
     def _get_stage_name(self) -> str:
         """Get the stage name for DLQ entries."""
-        return "evaluation"
+        return "evaluate"
 
     async def cleanup(self) -> None:
         """Clean up model adapters."""

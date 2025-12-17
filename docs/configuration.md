@@ -110,7 +110,14 @@ This is configured automatically in `docker-compose.yml` - no additional configu
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
-| `AI_MODELS` | Comma-separated model names | `chatgpt,gemini,claude,deepseek` | No |
+| `AI_MODELS` | Comma-separated model names | `chatgpt,gemini` | No |
+| `USE_REAL_AI` | Enable real AI evaluation | `false` | **Yes for production** |
+
+> **⚠️ IMPORTANT**: `USE_REAL_AI` defaults to `false` for safety. When `false`, the system returns deterministic stub decisions instead of calling AI APIs. **You must set `USE_REAL_AI=true` in production** to use real AI models.
+
+**Evaluation Modes**:
+- `USE_REAL_AI=false` (default): Stub mode - returns deterministic decisions for testing/development
+- `USE_REAL_AI=true`: Real mode - calls configured AI models in parallel
 
 #### Per-Model Configuration
 
