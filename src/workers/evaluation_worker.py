@@ -1,9 +1,29 @@
-"""Evaluation worker that processes enriched signals with AI models."""
+"""Evaluation worker that processes enriched signals with AI models.
 
-import json
+This worker consumes enriched signals from Redis and evaluates them using
+configured AI models (ChatGPT, Gemini, Claude, DeepSeek).
+
+Features:
+    - Parallel model evaluation for performance
+    - Output validation with fallback decisions
+    - Per-model error isolation (one failure doesn't block others)
+    - Token usage tracking
+    - Prompt version tracking
+
+Configuration:
+    AI_MODELS: Comma-separated list of models to use (e.g., "chatgpt,gemini,claude")
+    MODEL_{NAME}_*: Per-model configuration (API_KEY, MODEL_ID, TIMEOUT_MS, etc.)
+
+Usage:
+    worker = EvaluationWorker(redis_client, "worker-1")
+    await worker.run()
+"""
+
+import asyncio
+import os
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from src.core.config import settings
 from src.models.database import get_db_context
@@ -12,41 +32,94 @@ from src.models.orm.event import Event, ProcessingTimeline
 from src.models.schemas.decision import EntryPlan, ModelDecision, ModelMeta, RiskPlan
 from src.observability.logging import get_logger, log_stage
 from src.observability.metrics import metrics
+from src.services.evaluation.models import (
+    BaseModelAdapter,
+    ModelResponse,
+    ModelStatus,
+    create_adapter,
+    create_fallback_decision,
+    normalize_decision_output,
+    validate_decision_output,
+)
+from src.services.evaluation.prompt_loader import get_prompt_for_model
 from src.services.publisher.publisher import publisher
 from src.services.queue import QueueConsumer, RedisClient
 
 logger = get_logger(__name__)
 
+# Environment variable to enable/disable real AI evaluation
+# Set to "true" to use real AI models, "false" or unset for stub mode
+USE_REAL_AI = os.getenv("USE_REAL_AI", "false").lower() == "true"
+
 
 class EvaluationWorker(QueueConsumer):
-    """
-    Worker that evaluates enriched signals using AI models.
+    """Worker that evaluates enriched signals using AI models.
 
-    For Phase 1 (E2E skeleton), this creates stub decisions.
-    In later phases, this will call actual AI models (ChatGPT, Gemini, Claude, DeepSeek).
+    Supports two modes:
+        1. Stub mode (default): Returns deterministic stub decisions
+        2. Real mode: Calls actual AI models in parallel
+
+    Set USE_REAL_AI=true environment variable to enable real AI evaluation.
+
+    Class Invariants:
+        - Adapters are lazily initialized on first use
+        - Model failures are isolated (don't affect other models)
+        - All decisions have validated output schema
     """
 
     STREAM = "lens:signals:enriched"
     GROUP = "evaluation-workers"
 
     def __init__(self, redis_client: RedisClient, consumer_name: str):
+        """Initialize evaluation worker.
+
+        Args:
+            redis_client: Redis client for queue operations
+            consumer_name: Unique name for this consumer instance
+        """
         super().__init__(
             redis_client=redis_client,
             stream=self.STREAM,
             group=self.GROUP,
             consumer_name=consumer_name,
         )
+        self._adapters: Dict[str, BaseModelAdapter] = {}
+
+    def _get_adapter(self, model_name: str) -> Optional[BaseModelAdapter]:
+        """Get or create adapter for a model (lazy initialization).
+
+        Args:
+            model_name: Name of the model (e.g., 'chatgpt')
+
+        Returns:
+            Model adapter or None if creation fails
+        """
+        if model_name not in self._adapters:
+            try:
+                adapter = create_adapter(model_name)
+                if adapter.is_configured:
+                    self._adapters[model_name] = adapter
+                    logger.info(f"Initialized adapter for {model_name}")
+                else:
+                    logger.warning(f"Model {model_name} not configured (missing API key)")
+                    return None
+            except Exception as e:
+                logger.error(f"Failed to create adapter for {model_name}: {e}")
+                return None
+        return self._adapters.get(model_name)
 
     async def process_message(self, event_id: str, payload: Dict[str, Any]) -> bool:
-        """
-        Process an enriched signal and generate AI decisions.
+        """Process an enriched signal and generate AI decisions.
+
+        Evaluates the signal with all configured models in parallel,
+        validates outputs, and persists decisions to database.
 
         Args:
             event_id: Unique event identifier
-            payload: Enriched signal payload
+            payload: Enriched signal payload with market data and TA indicators
 
         Returns:
-            True if evaluation succeeded, False otherwise
+            True if at least one decision was generated, False otherwise
         """
         start_time = time.time()
         log_stage(logger, "EVALUATION", event_id, status="started")
@@ -55,17 +128,22 @@ class EvaluationWorker(QueueConsumer):
             # Get models to evaluate
             models = settings.ai_models_list
 
-            # Evaluate with each model (in parallel in Phase 2+, sequential for now)
-            decisions = []
-            for model_name in models:
-                decision = await self._evaluate_with_model(event_id, payload, model_name)
-                if decision:
-                    decisions.append((model_name, decision))
+            if USE_REAL_AI:
+                # Parallel evaluation with real AI models
+                decisions = await self._evaluate_parallel(event_id, payload, models)
+            else:
+                # Sequential stub evaluation (Phase 1 compatibility)
+                decisions = []
+                for model_name in models:
+                    decision = await self._evaluate_stub(event_id, payload, model_name)
+                    if decision:
+                        decisions.append((model_name, decision))
 
             if not decisions:
                 logger.error(f"No decisions generated for {event_id}")
                 return False
 
+            # Persist and publish decisions
             async with get_db_context() as db:
                 # Update event status
                 from sqlalchemy import select
@@ -85,12 +163,13 @@ class EvaluationWorker(QueueConsumer):
                     details={
                         "models": [m for m, _ in decisions],
                         "duration_ms": int((time.time() - start_time) * 1000),
+                        "mode": "real" if USE_REAL_AI else "stub",
                     },
                 )
                 db.add(timeline)
                 await db.commit()
 
-                # Publish decisions and update event status
+                # Publish decisions
                 for model_name, decision in decisions:
                     await self._publish_decision(
                         event_id=event_id,
@@ -128,21 +207,248 @@ class EvaluationWorker(QueueConsumer):
             log_stage(logger, "EVALUATION", event_id, status="failed", error=str(e))
             return False
 
+    async def _evaluate_parallel(
+        self,
+        event_id: str,
+        payload: Dict[str, Any],
+        models: List[str],
+    ) -> List[Tuple[str, ModelDecision]]:
+        """Evaluate signal with multiple models in parallel.
+
+        Args:
+            event_id: Event identifier
+            payload: Enriched signal payload
+            models: List of model names to evaluate
+
+        Returns:
+            List of (model_name, decision) tuples for successful evaluations
+        """
+        # Create tasks for all models
+        tasks = [
+            self._evaluate_with_model(event_id, payload, model_name)
+            for model_name in models
+        ]
+
+        # Run all evaluations concurrently
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Collect successful decisions
+        decisions = []
+        for model_name, result in zip(models, results):
+            if isinstance(result, Exception):
+                logger.error(f"Model {model_name} raised exception: {result}")
+                metrics.record_model_error(model_name, "exception")
+            elif result is not None:
+                decisions.append((model_name, result))
+
+        return decisions
+
     async def _evaluate_with_model(
         self,
         event_id: str,
         payload: Dict[str, Any],
         model_name: str,
     ) -> Optional[ModelDecision]:
-        """
-        Evaluate a signal with a specific AI model.
+        """Evaluate a signal with a specific AI model.
 
-        For Phase 1, this returns stub decisions.
+        Args:
+            event_id: Event identifier
+            payload: Enriched signal payload
+            model_name: Name of the model to use
+
+        Returns:
+            ModelDecision if successful, None on failure
         """
         start_time = time.time()
 
         try:
-            # Phase 1: Create stub decision
+            # Get adapter
+            adapter = self._get_adapter(model_name)
+            if adapter is None:
+                logger.warning(f"No adapter available for {model_name}, skipping")
+                return None
+
+            # Render prompt
+            constraints = payload.get("constraints", {})
+            prompt, prompt_version, prompt_hash = get_prompt_for_model(
+                model_name=model_name,
+                enriched_event=payload,
+                constraints=constraints,
+            )
+
+            # Call model
+            response: ModelResponse = await adapter.evaluate(prompt)
+            latency_ms = response.latency_ms
+
+            # Handle errors
+            if not response.is_success:
+                logger.warning(
+                    f"Model {model_name} returned error: {response.status.value} - {response.error_message}"
+                )
+
+                # Save error to database
+                await self._save_error_decision(
+                    event_id=event_id,
+                    model_name=model_name,
+                    response=response,
+                    prompt_version=prompt_version,
+                    prompt_hash=prompt_hash,
+                )
+
+                metrics.record_model_error(model_name, response.status.value)
+                return None
+
+            # Validate output schema
+            is_valid, errors = validate_decision_output(response.parsed_response)
+            if not is_valid:
+                logger.warning(
+                    f"Model {model_name} output validation failed: {errors}"
+                )
+
+                # Save with schema error
+                await self._save_error_decision(
+                    event_id=event_id,
+                    model_name=model_name,
+                    response=response,
+                    prompt_version=prompt_version,
+                    prompt_hash=prompt_hash,
+                    error_code="VALIDATION_FAILED",
+                    error_message="; ".join(errors),
+                )
+
+                metrics.record_model_error(model_name, "validation_error")
+                return None
+
+            # Normalize output
+            decision_data = normalize_decision_output(response.parsed_response)
+
+            # Create ModelDecision schema
+            decision = ModelDecision(
+                decision=decision_data["decision"],
+                confidence=decision_data["confidence"],
+                entry_plan=EntryPlan(**decision_data["entry_plan"]) if decision_data.get("entry_plan") else None,
+                risk_plan=RiskPlan(**decision_data["risk_plan"]) if decision_data.get("risk_plan") else None,
+                size_pct=decision_data.get("size_pct"),
+                reasons=decision_data["reasons"],
+                model_meta=ModelMeta(
+                    model_name=model_name,
+                    model_version=response.model_version,
+                    latency_ms=latency_ms,
+                    status="SUCCESS",
+                    tokens_used=response.total_tokens,
+                ),
+            )
+
+            # Save to database
+            async with get_db_context() as db:
+                decision_orm = ModelDecisionORM(
+                    event_id=event_id,
+                    model_name=model_name,
+                    model_version=response.model_version,
+                    prompt_version=prompt_version,
+                    prompt_hash=prompt_hash,
+                    decision=decision_data["decision"],
+                    confidence=decision_data["confidence"],
+                    entry_plan=decision_data.get("entry_plan"),
+                    risk_plan=decision_data.get("risk_plan"),
+                    size_pct=decision_data.get("size_pct"),
+                    reasons=decision_data["reasons"],
+                    decision_payload=decision_data,
+                    latency_ms=latency_ms,
+                    tokens_in=response.tokens_in,
+                    tokens_out=response.tokens_out,
+                    status="ok",
+                )
+                db.add(decision_orm)
+                await db.commit()
+
+            # Record metrics
+            metrics.record_evaluation(
+                model=model_name,
+                symbol=payload.get("symbol", "unknown"),
+                decision=decision_data["decision"],
+                duration_seconds=time.time() - start_time,
+                tokens_in=response.tokens_in,
+                tokens_out=response.tokens_out,
+            )
+
+            logger.info(
+                f"Model {model_name} decision: {decision_data['decision']} "
+                f"(confidence={decision_data['confidence']:.2f}, latency={latency_ms}ms)"
+            )
+
+            return decision
+
+        except Exception as e:
+            logger.error(f"Model {model_name} failed for {event_id}: {e}")
+            metrics.record_model_error(model_name, "evaluation_error")
+            return None
+
+    async def _save_error_decision(
+        self,
+        event_id: str,
+        model_name: str,
+        response: ModelResponse,
+        prompt_version: str,
+        prompt_hash: str,
+        error_code: Optional[str] = None,
+        error_message: Optional[str] = None,
+    ) -> None:
+        """Save a decision record for a failed evaluation.
+
+        Args:
+            event_id: Event identifier
+            model_name: Model name
+            response: Model response (may contain error info)
+            prompt_version: Prompt version used
+            prompt_hash: Hash of prompt content
+            error_code: Override error code
+            error_message: Override error message
+        """
+        try:
+            async with get_db_context() as db:
+                decision_orm = ModelDecisionORM(
+                    event_id=event_id,
+                    model_name=model_name,
+                    model_version=response.model_version,
+                    prompt_version=prompt_version,
+                    prompt_hash=prompt_hash,
+                    decision="IGNORE",
+                    confidence=0.0,
+                    reasons=["model_error"],
+                    decision_payload=create_fallback_decision(model_name, "error"),
+                    latency_ms=response.latency_ms,
+                    tokens_in=response.tokens_in,
+                    tokens_out=response.tokens_out,
+                    status=error_code or response.status.value,
+                    error_code=error_code or response.error_code,
+                    error_message=error_message or response.error_message,
+                    raw_response=response.raw_response,
+                )
+                db.add(decision_orm)
+                await db.commit()
+        except Exception as e:
+            logger.error(f"Failed to save error decision: {e}")
+
+    async def _evaluate_stub(
+        self,
+        event_id: str,
+        payload: Dict[str, Any],
+        model_name: str,
+    ) -> Optional[ModelDecision]:
+        """Evaluate using stub decision (Phase 1 compatibility mode).
+
+        Args:
+            event_id: Event identifier
+            payload: Enriched signal payload
+            model_name: Model name
+
+        Returns:
+            Stub ModelDecision
+        """
+        start_time = time.time()
+
+        try:
             decision_data = self._create_stub_decision(payload, model_name)
             latency_ms = int((time.time() - start_time) * 1000)
 
@@ -199,7 +505,7 @@ class EvaluationWorker(QueueConsumer):
             return decision
 
         except Exception as e:
-            logger.error(f"Model {model_name} failed for {event_id}: {e}")
+            logger.error(f"Stub model {model_name} failed for {event_id}: {e}")
             metrics.record_model_error(model_name, "evaluation_error")
             return None
 
@@ -208,14 +514,20 @@ class EvaluationWorker(QueueConsumer):
         payload: Dict[str, Any],
         model_name: str,
     ) -> Dict[str, Any]:
-        """
-        Create a stub decision for Phase 1.
+        """Create a stub decision for Phase 1.
 
-        This mimics the structure of real AI model output.
+        Simulates different model personalities with varying confidence/behavior.
+
+        Args:
+            payload: Signal payload
+            model_name: Model name
+
+        Returns:
+            Decision data dict
         """
         signal_direction = payload.get("signal_direction", "LONG")
 
-        # Simulate different model personalities with varying confidence/behavior
+        # Simulate different model personalities
         model_configs = {
             "chatgpt": {"confidence": 0.75, "decision": "FOLLOW_ENTER", "style": "aggressive"},
             "gemini": {"confidence": 0.68, "decision": "FOLLOW_ENTER", "style": "balanced"},
@@ -249,7 +561,7 @@ class EvaluationWorker(QueueConsumer):
             "confidence": confidence,
             "entry_plan": entry_plan,
             "risk_plan": risk_plan,
-            "size_pct": int(confidence * 20),  # Scale size with confidence
+            "size_pct": int(confidence * 20),
             "reasons": [
                 "bullish_trend" if signal_direction == "LONG" else "bearish_trend",
                 "ema_bullish_stack" if signal_direction == "LONG" else "ema_bearish_stack",
@@ -267,7 +579,16 @@ class EvaluationWorker(QueueConsumer):
         decision: ModelDecision,
         received_at: Optional[datetime] = None,
     ) -> None:
-        """Publish a decision via WebSocket."""
+        """Publish a decision via WebSocket.
+
+        Args:
+            event_id: Event identifier
+            symbol: Trading symbol
+            event_type: Signal type
+            model_name: Model that produced the decision
+            decision: Decision to publish
+            received_at: Original signal receipt time
+        """
         try:
             await publisher.publish_decision(
                 event_id=event_id,
@@ -283,3 +604,12 @@ class EvaluationWorker(QueueConsumer):
     def _get_stage_name(self) -> str:
         """Get the stage name for DLQ entries."""
         return "evaluation"
+
+    async def cleanup(self) -> None:
+        """Clean up model adapters."""
+        for model_name, adapter in self._adapters.items():
+            try:
+                await adapter.close()
+            except Exception as e:
+                logger.error(f"Error closing adapter {model_name}: {e}")
+        self._adapters.clear()

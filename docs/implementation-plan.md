@@ -11,7 +11,7 @@ This document outlines the phased implementation plan for SigmaPilot Lens MVP. T
 | **1** | E2E Skeleton | ✅ DONE | Working "Hello Lens" path: signal → enrich → evaluate → publish |
 | **2** | Signal Gateway | 🔶 70% | Network security, idempotency done; rate limiting & query endpoints pending |
 | **3** | Enrichment | ✅ DONE | Hyperliquid provider, TA indicators, signal validation, feature profiles |
-| **4** | AI Evaluation | ⬜ 0% | Multi-model engine, prompt management, output validation |
+| **4** | AI Evaluation | ✅ DONE | 4 AI models (ChatGPT, Gemini, Claude, DeepSeek), parallel evaluation, output validation |
 | **5** | Polish & Hardening | 🔶 50% | Metrics & logging done; audit queries & load testing pending |
 
 ---
@@ -213,60 +213,74 @@ Phase 1 is DONE only when:
 
 ---
 
-## Phase 4: AI Evaluation (Full)
+## Phase 4: AI Evaluation (Full) ✅ COMPLETED
 
 **Goal**: Replace stub evaluation with real multi-model AI evaluation.
 
-### 4.1 Model Interface
-- [ ] Abstract base class for AI models
-- [ ] `evaluate(enriched_event, prompt)` method
-- [ ] Timeout handling
-- [ ] Token tracking
+### 4.1 Model Interface ✅
+- [x] Abstract base class for AI models (`BaseModelAdapter`)
+- [x] `evaluate(prompt)` method returning `ModelResponse`
+- [x] Timeout handling (configurable per model)
+- [x] Token tracking (input/output tokens)
+- [x] ModelStatus enum for error categorization
 
-### 4.2 ChatGPT Implementation
-- [ ] OpenAI SDK integration
-- [ ] Configurable model (gpt-4o default)
-- [ ] JSON mode for structured output
-- [ ] Error handling (rate limits, timeouts)
+### 4.2 ChatGPT Implementation ✅
+- [x] OpenAI SDK integration (`openai_adapter.py`)
+- [x] Configurable model (gpt-4o default)
+- [x] JSON mode for structured output
+- [x] Error handling (rate limits, timeouts, API errors)
 
-### 4.3 Gemini Implementation
-- [ ] Google GenAI SDK integration
-- [ ] Configurable model (gemini-1.5-pro default)
-- [ ] JSON output enforcement
-- [ ] Error handling
+### 4.3 Gemini Implementation ✅
+- [x] Google GenAI SDK integration (`google_adapter.py`)
+- [x] Configurable model (gemini-1.5-pro default)
+- [x] JSON mime type output enforcement
+- [x] Error handling (quota, rate limits, connection errors)
 
-### 4.4 Prompt Management
-- [ ] Core + wrapper prompt structure
-- [ ] Prompt version tracking
-- [ ] Prompt hash for reproducibility
-- [ ] Dynamic prompt rendering
+### 4.4 Claude Implementation ✅ (NEW)
+- [x] Anthropic SDK integration (`anthropic_adapter.py`)
+- [x] Configurable model (claude-sonnet-4-20250514 default)
+- [x] System prompt for JSON output
+- [x] Error handling
 
-### 4.5 Output Validation
-- [ ] Parse model response as JSON
-- [ ] Validate against ModelDecision schema
-- [ ] Handle invalid outputs:
-  - Store raw response
-  - Mark status as 'invalid_json'
-  - Use fallback decision
+### 4.5 DeepSeek Implementation ✅ (NEW)
+- [x] OpenAI-compatible SDK (`deepseek_adapter.py`)
+- [x] Configurable model (deepseek-chat default)
+- [x] System prompt for JSON output
+- [x] Error handling
 
-### 4.6 Parallel Evaluation
-- [ ] Run all configured models concurrently
-- [ ] Isolate failures (one model failing doesn't block others)
-- [ ] Collect results from all models
-- [ ] Write N decisions per event
+### 4.6 Prompt Management ✅
+- [x] Core + wrapper prompt structure (`prompt_loader.py`)
+- [x] Prompt version tracking (version string returned)
+- [x] Prompt hash for reproducibility (SHA-256)
+- [x] Dynamic prompt rendering with enriched event data
 
-### 4.7 Evaluation Worker
-- [ ] Consume from `lens:signals:enriched`
-- [ ] Load prompts for each model
-- [ ] Call models in parallel
-- [ ] Validate and store decisions
-- [ ] Trigger publish for each decision
+### 4.7 Output Validation ✅
+- [x] Parse model response as JSON (`_parse_json_response`)
+- [x] Validate against ModelDecision schema (`validate_decision_output`)
+- [x] Handle invalid outputs:
+  - [x] Store raw response in `raw_response` column
+  - [x] Mark status as error code
+  - [x] Create fallback IGNORE decision
 
-### 4.8 Phase 4 Deliverables
-- [ ] Multi-model evaluation working
-- [ ] Prompt versioning tracked
-- [ ] Invalid output handling
-- [ ] Per-model metrics
+### 4.8 Parallel Evaluation ✅
+- [x] Run all configured models concurrently (`asyncio.gather`)
+- [x] Isolate failures (one model failing doesn't block others)
+- [x] Collect results from all models
+- [x] Write N decisions per event (one per model)
+
+### 4.9 Evaluation Worker ✅
+- [x] Consume from `lens:signals:enriched`
+- [x] Load prompts for each model
+- [x] Call models in parallel (when USE_REAL_AI=true)
+- [x] Validate and store decisions
+- [x] Trigger WebSocket publish for each decision
+- [x] Stub mode retained for testing (USE_REAL_AI=false default)
+
+### 4.10 Phase 4 Deliverables ✅
+- [x] Multi-model evaluation working (4 providers)
+- [x] Prompt versioning tracked in database
+- [x] Invalid output handling with fallback
+- [x] Per-model metrics (latency, tokens, errors)
 
 ---
 
@@ -414,10 +428,10 @@ Phase 1 is DONE only when:
 - [x] Quality flags detecting issues
 - [x] Signal validation rejecting invalid signals
 
-### Phase 4 (AI Evaluation)
-- [ ] ChatGPT + Gemini + Claude + DeepSeek producing real decisions
-- [ ] Invalid outputs handled gracefully
-- [ ] Prompt versioning tracked
+### Phase 4 (AI Evaluation) ✅ COMPLETE
+- [x] ChatGPT + Gemini + Claude + DeepSeek producing real decisions
+- [x] Invalid outputs handled gracefully (fallback to IGNORE)
+- [x] Prompt versioning tracked (version + hash in DB)
 
 ### Phase 5 (Polish) 🔶 PARTIAL
 - [x] Metrics and structured logging implemented
@@ -431,15 +445,14 @@ Phase 1 is DONE only when:
 
 This section lists all identified gaps that need to be addressed before the MVP is complete.
 
-### High Priority (Phase 4 - Required for MVP)
+### High Priority - ✅ RESOLVED (Phase 4 Complete)
 
-| Gap | Location | Description |
-|-----|----------|-------------|
-| Real AI Evaluation | `evaluation_worker.py` | Currently uses stub decisions; need real ChatGPT/Gemini/Claude/DeepSeek integration |
-| Model Interface | `services/evaluation/` | Abstract base class for AI models not implemented |
-| Prompt Management | `services/evaluation/` | Prompt loading exists but version tracking not active |
-| Output Validation | `evaluation_worker.py` | Parse and validate AI response against ModelDecision schema |
-| Parallel Evaluation | `evaluation_worker.py` | Run models concurrently (currently sequential) |
+Phase 4 AI Evaluation is now fully implemented:
+- Real AI models: ChatGPT, Gemini, Claude, DeepSeek (`services/evaluation/models/`)
+- Abstract base class: `BaseModelAdapter` with `ModelResponse`, `ModelStatus`
+- Output validation: `validate_decision_output()` with fallback decisions
+- Parallel evaluation: `asyncio.gather()` for concurrent model calls
+- Enable with `USE_REAL_AI=true` environment variable
 
 ### Medium Priority (Phase 2 Gaps)
 
