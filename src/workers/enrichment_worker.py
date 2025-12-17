@@ -19,10 +19,18 @@ logger = get_logger(__name__)
 
 class EnrichmentWorker(QueueConsumer):
     """
-    Worker that enriches raw trading signals with market data.
+    Worker that validates and enriches raw trading signals with market data.
 
-    Fetches real-time market data from Hyperliquid and computes
-    technical indicators based on the configured feature profile.
+    Process:
+        1. Validates signal age (max 5 minutes) and price drift (max 2%)
+        2. Rejects invalid signals early to save downstream AI costs
+        3. Fetches real-time market data from Hyperliquid
+        4. Computes technical indicators based on the configured feature profile
+        5. Enqueues enriched payload for AI evaluation
+
+    Invalid signals are marked as 'rejected' in the database and acknowledged
+    (not retried). Partial enrichment failures are marked as 'enrichment_partial'
+    but still forwarded to evaluation.
     """
 
     STREAM = "lens:signals:pending"

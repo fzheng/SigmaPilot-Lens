@@ -35,7 +35,7 @@ class Event(Base):
     ts_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     source: Mapped[str] = mapped_column(String(100), nullable=False)
 
-    # Processing status (queued|enriched|evaluated|published|failed|dlq)
+    # Processing status: queued, enriched, enrichment_partial, evaluated, published, rejected, failed, dlq
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued", index=True)
 
     # Feature profile used for enrichment (for reproducibility)

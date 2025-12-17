@@ -20,12 +20,18 @@ DLQ Stages:
     - enqueue: Failed to add signal to pending queue
     - enrich: Failed during market data fetching or TA calculation
     - evaluate: Failed during AI model evaluation
-    - publish: Failed during WebSocket broadcast
+    - publish: Failed during WebSocket broadcast or decision persistence
 
 Retry Behavior:
-    - enqueue/enrich: Re-enqueues to lens:signals:pending (full reprocessing)
+    - enqueue: Re-enqueues to lens:signals:pending
+    - enrich: Re-enqueues to lens:signals:pending (full reprocessing)
     - evaluate: Re-enqueues to lens:signals:enriched (skips enrichment)
-    - publish: Directly publishes via WebSocket
+    - publish: Persists decision to DB, updates event status to 'published',
+               adds timeline entry, then broadcasts via WebSocket
+
+Legacy Support:
+    Stage filters accept both current names (enrich, evaluate) and legacy
+    names (enrichment, evaluation) for backward compatibility with older entries.
 
 Access: Restricted to internal Docker network only.
 """
@@ -111,9 +117,17 @@ class DLQResolveResponse(BaseModel):
 
 
 def _normalize_stage_filter(stage: str) -> list:
-    """Map stage filter to include legacy values.
+    """Map stage filter to include legacy values for backward compatibility.
 
-    Handles both current (enrich, evaluate) and legacy (enrichment, evaluation) values.
+    DLQ entries created before stage naming was standardized may use 'enrichment'
+    or 'evaluation' instead of the current 'enrich' or 'evaluate'. This function
+    returns all matching stage values for database filtering.
+
+    Args:
+        stage: The stage to filter by (current or legacy name)
+
+    Returns:
+        List of stage values to include in filter (e.g., ['enrich', 'enrichment'])
     """
     stage_aliases = {
         "enrich": ["enrich", "enrichment"],
@@ -127,7 +141,15 @@ def _normalize_stage_filter(stage: str) -> list:
 def _normalize_stage_for_retry(stage: str) -> str:
     """Normalize legacy stage values to current values for retry logic.
 
-    Maps 'enrichment' -> 'enrich' and 'evaluation' -> 'evaluate'.
+    Ensures retry routing works correctly regardless of whether the DLQ entry
+    was created with legacy ('enrichment', 'evaluation') or current
+    ('enrich', 'evaluate') stage names.
+
+    Args:
+        stage: The stage value from the DLQ entry
+
+    Returns:
+        Normalized stage name for retry routing
     """
     legacy_to_current = {
         "enrichment": "enrich",

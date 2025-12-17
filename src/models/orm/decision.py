@@ -56,7 +56,7 @@ class ModelDecision(Base):
     tokens_in: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     tokens_out: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
-    # Status tracking (ok|invalid_json|timeout|provider_error|rate_limited)
+    # Status tracking: ok, timeout, rate_limited, api_error, schema_error, network_error, invalid_config
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="ok", index=True)
     error_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

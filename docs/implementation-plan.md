@@ -482,3 +482,14 @@ All core MVP functionality is now implemented:
 |-----|----------|-------------|
 | Support/Resistance | `ta_calculator.py` | Level detection for full_v1 profile |
 | Order Book Imbalance | `ta_calculator.py` | OBI calculation for full_v1 profile |
+
+### Future Improvements (From Code Review)
+
+These items were identified during code review as potential improvements for future iterations:
+
+| Item | Location | Description |
+|------|----------|-------------|
+| Configurable Network Allowlist | `src/core/network.py` | Move hardcoded IP networks to env vars |
+| Configurable Stream Names | `src/workers/*.py` | Move Redis stream/group names to settings |
+| Configurable Profile Path | `src/services/enrichment/enrichment_service.py` | Make feature profiles YAML path configurable |
+| Refactor Circular Imports | `src/api/v1/dlq.py` etc. | Clean up in-function imports used to avoid circular deps |

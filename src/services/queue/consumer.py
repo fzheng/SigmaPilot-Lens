@@ -44,7 +44,9 @@ class QueueConsumer(ABC):
             payload: Message payload
 
         Returns:
-            True if processing succeeded, False otherwise
+            True if processing succeeded (message acknowledged and removed from queue).
+            False if processing failed (triggers retry with exponential backoff;
+                after max retries, message is sent to DLQ).
         """
         pass
 
