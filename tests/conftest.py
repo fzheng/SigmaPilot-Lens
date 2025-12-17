@@ -15,6 +15,7 @@ os.environ["TESTING"] = "true"
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 os.environ["REDIS_URL"] = "redis://localhost:6379"
 os.environ["LOG_LEVEL"] = "WARNING"
+os.environ["USE_REAL_AI"] = "false"  # Use stub decisions in tests
 
 
 @pytest.fixture(scope="session")

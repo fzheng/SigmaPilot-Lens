@@ -204,6 +204,22 @@ async def submit_signal(
         logger.error(f"Failed to enqueue signal {event_id}: {e}")
         # Update event status to failed
         event.status = "failed"
+
+        # Create DLQ entry for enqueue failure
+        try:
+            from src.models.orm.dlq import DLQEntry
+
+            dlq_entry = DLQEntry(
+                event_id=event_id,
+                stage="enqueue",
+                reason_code=_classify_enqueue_error(str(e)),
+                error_message=str(e)[:2000],
+                payload=signal.model_dump(mode="json"),
+            )
+            db.add(dlq_entry)
+        except Exception as dlq_err:
+            logger.error(f"Failed to create DLQ entry for {event_id}: {dlq_err}")
+
         await db.commit()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -219,3 +235,15 @@ async def submit_signal(
         status="ENQUEUED",
         received_at=received_at,
     )
+
+
+def _classify_enqueue_error(error_message: str) -> str:
+    """Classify enqueue error message into a reason code."""
+    error_lower = error_message.lower()
+    if "timeout" in error_lower:
+        return "timeout"
+    if "connection" in error_lower or "refused" in error_lower:
+        return "network_error"
+    if "full" in error_lower or "capacity" in error_lower:
+        return "queue_full"
+    return "enqueue_error"

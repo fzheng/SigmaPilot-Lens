@@ -110,6 +110,20 @@ class DLQResolveResponse(BaseModel):
     resolved_at: datetime
 
 
+def _normalize_stage_filter(stage: str) -> list:
+    """Map stage filter to include legacy values.
+
+    Handles both current (enrich, evaluate) and legacy (enrichment, evaluation) values.
+    """
+    stage_aliases = {
+        "enrich": ["enrich", "enrichment"],
+        "evaluate": ["evaluate", "evaluation"],
+        "enqueue": ["enqueue"],
+        "publish": ["publish"],
+    }
+    return stage_aliases.get(stage, [stage])
+
+
 @router.get(
     "",
     response_model=DLQListResponse,
@@ -131,12 +145,15 @@ async def list_dlq_entries(
     Query DLQ entries.
 
     Supports filtering by stage, reason_code, event_id, resolution status, and time range.
+    Stage filter handles both current and legacy values (e.g., 'enrich' matches 'enrich' and 'enrichment').
     """
     # Build query with filters
     query = select(DLQEntry)
 
     if stage:
-        query = query.where(DLQEntry.stage == stage)
+        # Handle legacy stage values
+        stage_values = _normalize_stage_filter(stage)
+        query = query.where(DLQEntry.stage.in_(stage_values))
     if reason_code:
         query = query.where(DLQEntry.reason_code == reason_code)
     if event_id:
@@ -301,28 +318,49 @@ async def retry_dlq_entry(
                 raise ValueError("No event_id for evaluation retry")
 
         elif entry.stage == "publish":
-            # Re-publish via WebSocket
+            # Re-publish via WebSocket and persist to DB
             from src.services.publisher import publisher
-            from src.models.schemas.decision import ModelDecision, ModelMeta
+            from src.models.schemas.decision import ModelDecision as ModelDecisionSchema, ModelMeta
+            from src.models.orm.decision import ModelDecision as ModelDecisionORM
             if entry.event_id:
                 # Reconstruct decision from payload
                 payload = entry.payload
-                decision = ModelDecision(
-                    decision=payload.get("decision", "IGNORE"),
-                    confidence=payload.get("confidence", 0.0),
-                    reasons=payload.get("reasons", ["retry"]),
+                model_name = payload.get("model", "unknown")
+                decision_value = payload.get("decision", "IGNORE")
+                confidence = payload.get("confidence", 0.0)
+                reasons = payload.get("reasons", ["retry"])
+
+                # Persist to model_decisions table (if not already there)
+                decision_record = ModelDecisionORM(
+                    event_id=entry.event_id,
+                    model_name=model_name,
+                    model_version=payload.get("model_version", "unknown"),
+                    decision=decision_value,
+                    confidence=confidence,
+                    reasons=reasons,
+                    decision_payload=payload,
+                    latency_ms=payload.get("latency_ms", 0),
+                    status="ok",
+                )
+                db.add(decision_record)
+
+                # Build schema for publish
+                decision = ModelDecisionSchema(
+                    decision=decision_value,
+                    confidence=confidence,
+                    reasons=reasons,
                     model_meta=ModelMeta(
-                        model_name=payload.get("model", "unknown"),
+                        model_name=model_name,
                         model_version=payload.get("model_version", "unknown"),
-                        latency_ms=0,
-                        status="RETRY",
+                        latency_ms=payload.get("latency_ms", 0),
+                        status="OK",
                     ),
                 )
                 await publisher.publish_decision(
                     event_id=entry.event_id,
                     symbol=payload.get("symbol", "UNKNOWN"),
                     event_type=payload.get("event_type", "OPEN_SIGNAL"),
-                    model=payload.get("model", "unknown"),
+                    model=model_name,
                     decision=decision,
                 )
             else:
