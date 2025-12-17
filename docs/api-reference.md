@@ -428,6 +428,129 @@ ws://gateway:8000/api/v1/ws/stream
 
 ---
 
+## Dead Letter Queue (DLQ)
+
+### List DLQ Entries
+
+Query failed processing entries.
+
+```
+GET /dlq
+```
+
+**Query Parameters**:
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `stage` | string | - | Filter by stage (enqueue\|enrich\|evaluate\|publish) |
+| `reason_code` | string | - | Filter by reason code |
+| `event_id` | string | - | Filter by event ID |
+| `resolved` | boolean | - | Filter by resolution status |
+| `since` | datetime | - | Entries after this time |
+| `until` | datetime | - | Entries before this time |
+| `limit` | int | 50 | Max results (1-100) |
+| `offset` | int | 0 | Pagination offset |
+
+**Response** `200 OK`:
+```json
+{
+  "items": [
+    {
+      "id": "dlq-001",
+      "event_id": "550e8400-e29b-41d4-a716-446655440000",
+      "stage": "enrich",
+      "reason_code": "PROVIDER_ERROR",
+      "error_message": "Hyperliquid API timeout",
+      "retry_count": 3,
+      "created_at": "2024-01-15T10:30:00Z",
+      "resolved_at": null
+    }
+  ],
+  "total": 15,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+### Get DLQ Entry
+
+Get full details of a DLQ entry including payload.
+
+```
+GET /dlq/{dlq_id}
+```
+
+**Response** `200 OK`:
+```json
+{
+  "id": "dlq-001",
+  "event_id": "550e8400-e29b-41d4-a716-446655440000",
+  "stage": "enrich",
+  "reason_code": "PROVIDER_ERROR",
+  "error_message": "Hyperliquid API returned 503 Service Unavailable",
+  "payload": {
+    "symbol": "BTC",
+    "entry_price": 42000.50,
+    "signal_direction": "long"
+  },
+  "retry_count": 3,
+  "last_retry_at": "2024-01-15T10:35:00Z",
+  "resolved_at": null,
+  "resolution_note": null,
+  "created_at": "2024-01-15T10:30:00Z"
+}
+```
+
+### Retry DLQ Entry
+
+Re-enqueue a failed entry for processing.
+
+```
+POST /dlq/{dlq_id}/retry
+```
+
+**Response** `200 OK`:
+```json
+{
+  "id": "dlq-001",
+  "status": "retrying",
+  "message": "Entry re-enqueued for enrich processing",
+  "retry_count": 4
+}
+```
+
+**Error Response** `400 Bad Request`:
+```json
+{
+  "detail": "Cannot retry a resolved DLQ entry"
+}
+```
+
+### Resolve DLQ Entry
+
+Mark an entry as manually resolved.
+
+```
+POST /dlq/{dlq_id}/resolve
+```
+
+**Request Body**:
+```json
+{
+  "resolution_note": "Manually fixed data issue and re-submitted signal"
+}
+```
+
+**Response** `200 OK`:
+```json
+{
+  "id": "dlq-001",
+  "status": "resolved",
+  "resolved_at": "2024-01-15T11:00:00Z"
+}
+```
+
+---
+
 ## Error Codes
 
 | Code | HTTP Status | Description |

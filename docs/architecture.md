@@ -48,10 +48,18 @@ SigmaPilot Lens follows an event-driven architecture with clear separation of co
 
 **Endpoints**:
 - `POST /api/v1/signals` - Submit trading signal
-- `GET /api/v1/events` - List events
-- `GET /api/v1/events/{event_id}` - Get event details
-- `GET /api/v1/decisions` - List AI decisions
+- `GET /api/v1/events` - List events with filtering
+- `GET /api/v1/events/{event_id}` - Get event details with timeline
+- `GET /api/v1/events/{event_id}/status` - Get processing status
+- `GET /api/v1/decisions` - List AI decisions with filtering
+- `GET /api/v1/decisions/{id}` - Get decision details
+- `GET /api/v1/dlq` - List dead letter queue entries
+- `GET /api/v1/dlq/{id}` - Get DLQ entry details
+- `POST /api/v1/dlq/{id}/retry` - Retry failed entry
+- `POST /api/v1/dlq/{id}/resolve` - Mark entry as resolved
 - `GET /api/v1/health` - Health check
+- `GET /api/v1/ready` - Readiness check
+- `GET /api/v1/metrics` - Prometheus metrics
 
 ### 2. Redis Streams Queue
 
@@ -99,11 +107,20 @@ SigmaPilot Lens follows an event-driven architecture with clear separation of co
 - Parallel model execution (failures isolated)
 - Strict output schema validation
 - Token economy controls per model
+- Fallback decisions for failed evaluations (IGNORE with 0 confidence)
+- Prompt versioning and hash tracking for reproducibility
 
 **Supported Models**:
-- ChatGPT (OpenAI API)
-- Gemini (Google AI API)
-- Extensible for additional models
+- **ChatGPT** (OpenAI API) - GPT-4o default
+- **Gemini** (Google AI API) - Gemini 1.5 Pro default
+- **Claude** (Anthropic API) - Claude Sonnet 4 default
+- **DeepSeek** (DeepSeek API) - DeepSeek Chat default
+
+**Adapter Pattern**: Each provider has a dedicated adapter implementing `BaseModelAdapter`:
+- `OpenAIAdapter` - For ChatGPT and compatible APIs
+- `GoogleAdapter` - For Gemini models
+- `AnthropicAdapter` - For Claude models
+- `DeepSeekAdapter` - For DeepSeek models (OpenAI-compatible)
 
 ### 5. WebSocket Publisher
 
@@ -240,7 +257,7 @@ services:
 | ORM | SQLAlchemy 2.0 |
 | Migrations | Alembic |
 | WebSocket | FastAPI WebSocket |
-| AI Clients | OpenAI SDK, Google GenAI SDK |
+| AI Clients | OpenAI SDK, Google GenAI SDK, Anthropic SDK |
 | TA Library | pandas-ta, ta-lib |
 | Metrics | prometheus-client |
 | Containerization | Docker, Docker Compose |

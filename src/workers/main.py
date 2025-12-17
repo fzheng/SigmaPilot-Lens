@@ -1,4 +1,30 @@
-"""Worker process entry point."""
+"""Worker process entry point.
+
+This module serves as the main entry point for the worker process that handles
+signal processing in SigmaPilot Lens. It orchestrates two concurrent workers:
+
+1. EnrichmentWorker: Consumes signals from the pending queue, validates them
+   against current market conditions, fetches market data from Hyperliquid,
+   computes technical indicators, and produces enriched events.
+
+2. EvaluationWorker: Consumes enriched events, evaluates them using multiple
+   AI models in parallel, validates outputs, and publishes decisions via WebSocket.
+
+Key Features:
+- Graceful shutdown handling (SIGINT/SIGTERM)
+- Unique consumer names for Redis consumer groups (enables horizontal scaling)
+- Connection lifecycle management (Redis, PostgreSQL)
+- Worker failure detection and logging
+
+Usage:
+    python -m src.workers.main
+
+Environment:
+    - FEATURE_PROFILE: Enrichment profile (trend_follow_v1, crypto_perps_v1, full_v1)
+    - AI_MODELS: Comma-separated list of AI models to use
+    - DATABASE_URL: PostgreSQL connection string
+    - REDIS_URL: Redis connection string
+"""
 
 import asyncio
 import os
@@ -23,7 +49,16 @@ logger = get_logger(__name__)
 
 
 async def run_workers():
-    """Run all worker processes."""
+    """Run all worker processes.
+
+    Initializes connections, creates worker instances, and runs them concurrently.
+    Handles graceful shutdown on SIGINT/SIGTERM signals with a 10-second timeout
+    for worker cancellation.
+
+    The function creates unique consumer names using hostname and PID to enable
+    multiple worker instances to participate in the same consumer group for
+    horizontal scaling.
+    """
     # Set up logging
     setup_logging()
 

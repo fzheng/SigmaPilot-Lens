@@ -2,9 +2,23 @@
 
 **Real-time Trading Signal Analysis Pipeline**
 
+[![MVP Status](https://img.shields.io/badge/MVP-Complete-green.svg)](docs/implementation-plan.md)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/license-Private-red.svg)](LICENSE)
+
 SigmaPilot Lens is a private, single-tenant module that ingests trading signals, enriches them with market data, evaluates them using multiple AI models (ChatGPT, Gemini, Claude, DeepSeek), and publishes follow/ignore recommendations via WebSocket.
 
 > **Note**: SigmaPilot Lens does NOT place trades. It provides AI-powered analysis and recommendations only.
+
+## Features
+
+- **Multi-Model AI Evaluation**: Parallel evaluation using 4 AI providers (OpenAI, Google, Anthropic, DeepSeek)
+- **Real-time Market Enrichment**: Live data from Hyperliquid with technical analysis indicators
+- **Signal Validation**: Early rejection of stale or price-drifted signals
+- **WebSocket Streaming**: Real-time decision delivery with subscription filters
+- **Dead Letter Queue**: Robust failure handling with retry and resolution workflows
+- **Comprehensive Observability**: Prometheus metrics, structured logging, audit trails
+- **Production Ready**: Resource limits, graceful shutdown, load tested for 60 signals/min
 
 ## Architecture
 
@@ -160,6 +174,19 @@ See [Configuration Guide](docs/configuration.md) for all options.
 | [Data Contracts](docs/data-contracts.md) | Schema definitions |
 | [Configuration](docs/configuration.md) | All configuration options |
 | [Deployment](docs/deployment.md) | Production deployment guide |
+| [Implementation Plan](docs/implementation-plan.md) | Development roadmap and status |
+
+## Project Status
+
+**MVP Complete** - All 5 phases implemented:
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 1 | E2E Skeleton | ✅ Done |
+| 2 | Signal Gateway | ✅ Done |
+| 3 | Data Enrichment | ✅ Done |
+| 4 | AI Evaluation | ✅ Done |
+| 5 | Polish & Hardening | ✅ Done |
 
 ## License
 

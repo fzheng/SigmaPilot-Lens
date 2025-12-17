@@ -110,7 +110,7 @@ This is configured automatically in `docker-compose.yml` - no additional configu
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
-| `AI_MODELS` | Comma-separated model names | `chatgpt,gemini` | No |
+| `AI_MODELS` | Comma-separated model names | `chatgpt,gemini,claude,deepseek` | No |
 
 #### Per-Model Configuration
 
@@ -143,6 +143,24 @@ MODEL_GEMINI_MODEL_ID=gemini-1.5-pro
 MODEL_GEMINI_TIMEOUT_MS=30000
 MODEL_GEMINI_MAX_TOKENS=1000
 MODEL_GEMINI_PROMPT_PATH=/app/prompts/gemini_v1.md
+```
+
+**Example (Claude)**:
+```
+MODEL_CLAUDE_PROVIDER=anthropic
+MODEL_CLAUDE_API_KEY=sk-ant-your-anthropic-key
+MODEL_CLAUDE_MODEL_ID=claude-sonnet-4-20250514
+MODEL_CLAUDE_TIMEOUT_MS=30000
+MODEL_CLAUDE_MAX_TOKENS=1000
+```
+
+**Example (DeepSeek)**:
+```
+MODEL_DEEPSEEK_PROVIDER=deepseek
+MODEL_DEEPSEEK_API_KEY=your-deepseek-key
+MODEL_DEEPSEEK_MODEL_ID=deepseek-chat
+MODEL_DEEPSEEK_TIMEOUT_MS=30000
+MODEL_DEEPSEEK_MAX_TOKENS=1000
 ```
 
 ### WebSocket
@@ -315,7 +333,7 @@ STALE_CTX_S=60
 # ===================
 # AI Models
 # ===================
-AI_MODELS=chatgpt,gemini
+AI_MODELS=chatgpt,gemini,claude,deepseek
 
 # ChatGPT Configuration
 MODEL_CHATGPT_PROVIDER=openai
@@ -323,7 +341,6 @@ MODEL_CHATGPT_API_KEY=sk-your-openai-api-key
 MODEL_CHATGPT_MODEL_ID=gpt-4o
 MODEL_CHATGPT_TIMEOUT_MS=30000
 MODEL_CHATGPT_MAX_TOKENS=1000
-MODEL_CHATGPT_PROMPT_PATH=/app/prompts/chatgpt_v1.md
 
 # Gemini Configuration
 MODEL_GEMINI_PROVIDER=google
@@ -331,7 +348,20 @@ MODEL_GEMINI_API_KEY=your-google-ai-api-key
 MODEL_GEMINI_MODEL_ID=gemini-1.5-pro
 MODEL_GEMINI_TIMEOUT_MS=30000
 MODEL_GEMINI_MAX_TOKENS=1000
-MODEL_GEMINI_PROMPT_PATH=/app/prompts/gemini_v1.md
+
+# Claude Configuration
+MODEL_CLAUDE_PROVIDER=anthropic
+MODEL_CLAUDE_API_KEY=sk-ant-your-anthropic-api-key
+MODEL_CLAUDE_MODEL_ID=claude-sonnet-4-20250514
+MODEL_CLAUDE_TIMEOUT_MS=30000
+MODEL_CLAUDE_MAX_TOKENS=1000
+
+# DeepSeek Configuration
+MODEL_DEEPSEEK_PROVIDER=deepseek
+MODEL_DEEPSEEK_API_KEY=your-deepseek-api-key
+MODEL_DEEPSEEK_MODEL_ID=deepseek-chat
+MODEL_DEEPSEEK_TIMEOUT_MS=30000
+MODEL_DEEPSEEK_MAX_TOKENS=1000
 
 # ===================
 # WebSocket

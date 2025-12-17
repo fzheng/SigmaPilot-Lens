@@ -1,4 +1,31 @@
-"""Signal ingestion endpoints."""
+"""Signal ingestion endpoints.
+
+This module provides the primary API endpoint for submitting trading signals
+to SigmaPilot Lens for analysis. It handles:
+
+1. Schema Validation: Validates incoming signals against Pydantic models
+2. Rate Limiting: Applies per-client rate limits using Redis sliding window
+3. Idempotency: Prevents duplicate processing via X-Idempotency-Key header
+4. Persistence: Stores signal in PostgreSQL with initial 'queued' status
+5. Enqueueing: Pushes signal to Redis Stream for async processing
+
+Signal Flow:
+    POST /signals → Validate → Rate Limit → Idempotency Check
+                  → Generate event_id → Persist → Enqueue → Response
+
+Response Headers:
+    - X-RateLimit-Limit: Requests allowed per minute
+    - X-RateLimit-Remaining: Requests remaining in current window
+    - X-RateLimit-Window: Window size in seconds
+
+Error Responses:
+    - 400: Invalid request body (schema validation failed)
+    - 403: Access denied (external network)
+    - 429: Rate limit exceeded (Retry-After header included)
+    - 500: Queue error (failed to enqueue signal)
+
+Access: Restricted to internal Docker network only.
+"""
 
 import time
 from datetime import datetime, timezone

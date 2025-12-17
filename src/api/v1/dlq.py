@@ -1,4 +1,34 @@
-"""Dead Letter Queue (DLQ) management endpoints."""
+"""Dead Letter Queue (DLQ) management endpoints.
+
+This module provides REST API endpoints for managing failed signal processing
+entries in the Dead Letter Queue. The DLQ captures signals that failed during
+any stage of processing: enqueue, enrich, evaluate, or publish.
+
+Endpoints:
+    GET  /dlq              - List DLQ entries with filtering and pagination
+    GET  /dlq/{id}         - Get full details of a specific DLQ entry
+    POST /dlq/{id}/retry   - Re-enqueue a failed entry for reprocessing
+    POST /dlq/{id}/resolve - Mark an entry as manually resolved
+
+Use Cases:
+    - Debugging: Inspect failed signal payloads and error messages
+    - Recovery: Retry transient failures (e.g., API timeouts)
+    - Operations: Mark entries as resolved after manual intervention
+    - Monitoring: Track failure patterns by stage and reason code
+
+DLQ Stages:
+    - enqueue: Failed to add signal to pending queue
+    - enrich: Failed during market data fetching or TA calculation
+    - evaluate: Failed during AI model evaluation
+    - publish: Failed during WebSocket broadcast
+
+Retry Behavior:
+    - enqueue/enrich: Re-enqueues to lens:signals:pending (full reprocessing)
+    - evaluate: Re-enqueues to lens:signals:enriched (skips enrichment)
+    - publish: Directly publishes via WebSocket
+
+Access: Restricted to internal Docker network only.
+"""
 
 from datetime import datetime
 from typing import List, Optional
