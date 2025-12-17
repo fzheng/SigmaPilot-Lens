@@ -8,10 +8,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.api.v1.router import api_router
 from src.core.network import InternalNetworkMiddleware
 from src.core.config import settings
+from src.core.rate_limit import init_rate_limiter
 from src.models.database import close_db, init_db
 from src.observability.logging import get_logger, setup_logging
 from src.observability.metrics import metrics
-from src.services.queue import close_redis_client, init_redis_client, reset_queue_producer
+from src.services.queue import close_redis_client, get_redis_client, init_redis_client, reset_queue_producer
 
 logger = get_logger(__name__)
 
@@ -30,6 +31,10 @@ async def lifespan(app: FastAPI):
     # Initialize Redis connection
     await init_redis_client()
     logger.info("Redis connection initialized")
+
+    # Initialize rate limiter with Redis
+    await init_rate_limiter(get_redis_client())
+    logger.info(f"Rate limiter initialized (enabled={settings.RATE_LIMIT_ENABLED}, limit={settings.RATE_LIMIT_PER_MIN}/min)")
 
     # Set application info metrics
     metrics.set_app_info(

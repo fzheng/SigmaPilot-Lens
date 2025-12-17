@@ -5,11 +5,12 @@ from datetime import datetime, timezone
 from typing import Annotated, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
+from src.core.rate_limit import get_rate_limiter
 from src.models.database import get_db_session
 from src.models.orm.event import Event, ProcessingTimeline
 from src.models.schemas.signal import (
@@ -25,6 +26,38 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
+async def check_rate_limit(request: Request):
+    """Dependency to check rate limit before processing request."""
+    if not settings.RATE_LIMIT_ENABLED:
+        return
+
+    try:
+        rate_limiter = get_rate_limiter()
+    except RuntimeError:
+        # Rate limiter not initialized, skip check
+        logger.warning("Rate limiter not initialized, skipping rate limit check")
+        return
+
+    # Use client IP or source from request as rate limit key
+    client_host = request.client.host if request.client else "unknown"
+    rate_limit_key = f"signals:{client_host}"
+
+    is_allowed, remaining, retry_after = await rate_limiter.is_allowed(rate_limit_key)
+
+    if not is_allowed:
+        logger.warning(f"Rate limit exceeded for {client_host}")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={
+                "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "Too many requests. Please try again later.",
+                }
+            },
+            headers={"Retry-After": str(retry_after)},
+        )
+
+
 @router.post(
     "",
     response_model=SignalSubmitResponse,
@@ -35,7 +68,10 @@ router = APIRouter()
 async def submit_signal(
     signal: SignalSubmitRequest,
     db: Annotated[AsyncSession, Depends(get_db_session)],
+    response: Response,
+    request: Request,
     idempotency_key: Annotated[Optional[str], Header(alias="X-Idempotency-Key")] = None,
+    _: None = Depends(check_rate_limit),
 ):
     """
     Submit a trading signal for analysis.
@@ -47,9 +83,23 @@ async def submit_signal(
     4. Enqueued for enrichment and AI evaluation
 
     Returns the event_id for tracking.
+
+    Rate limited to prevent abuse (configurable via RATE_LIMIT_* env vars).
     """
     start_time = time.time()
     received_at = datetime.now(timezone.utc)
+
+    # Add rate limit headers to response
+    if settings.RATE_LIMIT_ENABLED:
+        try:
+            rate_limiter = get_rate_limiter()
+            client_host = request.client.host if request.client else "unknown"
+            usage = await rate_limiter.get_usage(f"signals:{client_host}")
+            response.headers["X-RateLimit-Limit"] = str(usage["limit"])
+            response.headers["X-RateLimit-Remaining"] = str(usage["remaining"])
+            response.headers["X-RateLimit-Window"] = str(usage["window_seconds"])
+        except Exception:
+            pass  # Don't fail request if rate limit headers can't be added
 
     # Check for idempotency
     if idempotency_key:
