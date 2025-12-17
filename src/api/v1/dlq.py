@@ -124,6 +124,18 @@ def _normalize_stage_filter(stage: str) -> list:
     return stage_aliases.get(stage, [stage])
 
 
+def _normalize_stage_for_retry(stage: str) -> str:
+    """Normalize legacy stage values to current values for retry logic.
+
+    Maps 'enrichment' -> 'enrich' and 'evaluation' -> 'evaluate'.
+    """
+    legacy_to_current = {
+        "enrichment": "enrich",
+        "evaluation": "evaluate",
+    }
+    return legacy_to_current.get(stage, stage)
+
+
 @router.get(
     "",
     response_model=DLQListResponse,
@@ -288,9 +300,12 @@ async def retry_dlq_entry(
     entry.retry_count += 1
     entry.last_retry_at = datetime.utcnow()
 
+    # Normalize legacy stage values for retry logic
+    normalized_stage = _normalize_stage_for_retry(entry.stage)
+
     # Attempt to re-enqueue based on stage
     try:
-        if entry.stage == "enqueue":
+        if normalized_stage == "enqueue":
             # Re-enqueue to pending signals
             from src.services.queue import get_queue_producer
             producer = get_queue_producer()
@@ -299,7 +314,7 @@ async def retry_dlq_entry(
             else:
                 raise ValueError("No event_id for enqueue retry")
 
-        elif entry.stage == "enrich":
+        elif normalized_stage == "enrich":
             # Re-enqueue to pending signals (will go through enrichment again)
             from src.services.queue import get_queue_producer
             producer = get_queue_producer()
@@ -308,7 +323,7 @@ async def retry_dlq_entry(
             else:
                 raise ValueError("No event_id for enrichment retry")
 
-        elif entry.stage == "evaluate":
+        elif normalized_stage == "evaluate":
             # Re-enqueue to enriched queue
             from src.services.queue import get_queue_producer
             producer = get_queue_producer()
@@ -317,54 +332,87 @@ async def retry_dlq_entry(
             else:
                 raise ValueError("No event_id for evaluation retry")
 
-        elif entry.stage == "publish":
-            # Re-publish via WebSocket and persist to DB
+        elif normalized_stage == "publish":
+            # Re-publish via WebSocket and persist to DB with full bookkeeping
+            import time
+            from datetime import timezone
             from src.services.publisher import publisher
             from src.models.schemas.decision import ModelDecision as ModelDecisionSchema, ModelMeta
             from src.models.orm.decision import ModelDecision as ModelDecisionORM
-            if entry.event_id:
-                # Reconstruct decision from payload
-                payload = entry.payload
-                model_name = payload.get("model", "unknown")
-                decision_value = payload.get("decision", "IGNORE")
-                confidence = payload.get("confidence", 0.0)
-                reasons = payload.get("reasons", ["retry"])
+            from src.models.orm.event import Event, ProcessingTimeline
+            from src.observability.metrics import metrics
 
-                # Persist to model_decisions table (if not already there)
-                decision_record = ModelDecisionORM(
+            if not entry.event_id:
+                raise ValueError("No event_id for publish retry")
+
+            publish_start = time.time()
+            now = datetime.now(timezone.utc)
+
+            # Reconstruct decision from payload
+            payload = entry.payload
+            model_name = payload.get("model", "unknown")
+            decision_value = payload.get("decision", "IGNORE")
+            confidence = payload.get("confidence", 0.0)
+            reasons = payload.get("reasons", ["retry"])
+
+            # Persist to model_decisions table
+            decision_record = ModelDecisionORM(
+                event_id=entry.event_id,
+                model_name=model_name,
+                model_version=payload.get("model_version", "unknown"),
+                decision=decision_value,
+                confidence=confidence,
+                reasons=reasons,
+                decision_payload=payload,
+                latency_ms=payload.get("latency_ms", 0),
+                status="ok",
+            )
+            db.add(decision_record)
+
+            # Update parent event status and published_at
+            event_query = select(Event).where(Event.event_id == entry.event_id)
+            event_result = await db.execute(event_query)
+            event = event_result.scalar_one_or_none()
+            if event:
+                event.status = "published"
+                event.published_at = now
+
+                # Add PUBLISHED timeline entry
+                timeline_entry = ProcessingTimeline(
                     event_id=entry.event_id,
+                    status="PUBLISHED",
+                    details={"model": model_name, "decision": decision_value, "source": "dlq_retry"},
+                )
+                db.add(timeline_entry)
+
+            # Build schema for publish
+            decision = ModelDecisionSchema(
+                decision=decision_value,
+                confidence=confidence,
+                reasons=reasons,
+                model_meta=ModelMeta(
                     model_name=model_name,
                     model_version=payload.get("model_version", "unknown"),
-                    decision=decision_value,
-                    confidence=confidence,
-                    reasons=reasons,
-                    decision_payload=payload,
                     latency_ms=payload.get("latency_ms", 0),
-                    status="ok",
-                )
-                db.add(decision_record)
+                    status="OK",
+                ),
+            )
+            await publisher.publish_decision(
+                event_id=entry.event_id,
+                symbol=payload.get("symbol", "UNKNOWN"),
+                event_type=payload.get("event_type", "OPEN_SIGNAL"),
+                model=model_name,
+                decision=decision,
+            )
 
-                # Build schema for publish
-                decision = ModelDecisionSchema(
-                    decision=decision_value,
-                    confidence=confidence,
-                    reasons=reasons,
-                    model_meta=ModelMeta(
-                        model_name=model_name,
-                        model_version=payload.get("model_version", "unknown"),
-                        latency_ms=payload.get("latency_ms", 0),
-                        status="OK",
-                    ),
-                )
-                await publisher.publish_decision(
-                    event_id=entry.event_id,
-                    symbol=payload.get("symbol", "UNKNOWN"),
-                    event_type=payload.get("event_type", "OPEN_SIGNAL"),
-                    model=model_name,
-                    decision=decision,
-                )
-            else:
-                raise ValueError("No event_id for publish retry")
+            # Record publish metrics
+            fanout_duration = time.time() - publish_start
+            metrics.record_publish(model_name, fanout_duration)
+
+            # Record end-to-end metrics if we have received_at
+            if event and event.received_at:
+                e2e_duration = (now - event.received_at).total_seconds()
+                metrics.record_end_to_end(e2e_duration)
 
         else:
             raise ValueError(f"Unknown stage: {entry.stage}")
@@ -375,7 +423,7 @@ async def retry_dlq_entry(
         return DLQRetryResponse(
             id=str(entry.id),
             status="retrying",
-            message=f"Entry re-enqueued for {entry.stage} processing",
+            message=f"Entry re-enqueued for {normalized_stage} processing",
             retry_count=entry.retry_count,
         )
 
