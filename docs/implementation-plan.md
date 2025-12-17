@@ -6,17 +6,17 @@ This document outlines the phased implementation plan for SigmaPilot Lens MVP. T
 
 ## Phase Summary
 
-| Phase | Description | Key Deliverable |
-|-------|-------------|-----------------|
-| **1** | E2E Skeleton | Working "Hello Lens" path: signal → enrich (stub) → evaluate (stub) → publish |
-| **2** | Signal Gateway (Full) | Production auth, rate limiting, schema validation, idempotency |
-| **3** | Enrichment (Full) | Hyperliquid provider, TA indicators, feature profiles |
-| **4** | AI Evaluation (Full) | Multi-model engine, prompt management, output validation |
-| **5** | Polish & Hardening | Metrics, audit queries, load testing, deployment optimization |
+| Phase | Description | Status | Key Deliverable |
+|-------|-------------|--------|-----------------|
+| **1** | E2E Skeleton | ✅ DONE | Working "Hello Lens" path: signal → enrich → evaluate → publish |
+| **2** | Signal Gateway | 🔶 70% | Network security, idempotency done; rate limiting & query endpoints pending |
+| **3** | Enrichment | ✅ DONE | Hyperliquid provider, TA indicators, signal validation, feature profiles |
+| **4** | AI Evaluation | ⬜ 0% | Multi-model engine, prompt management, output validation |
+| **5** | Polish & Hardening | 🔶 50% | Metrics & logging done; audit queries & load testing pending |
 
 ---
 
-## Phase 1: E2E Skeleton ("Hello Lens")
+## Phase 1: E2E Skeleton ("Hello Lens") ✅ COMPLETED
 
 **Goal**: Establish a working end-to-end flow from signal submission to WebSocket publish. All components are stubs, but the plumbing works.
 
@@ -24,13 +24,13 @@ This document outlines the phased implementation plan for SigmaPilot Lens MVP. T
 
 Phase 1 is DONE only when:
 
-- [ ] `docker compose up` starts all services (gateway, worker, redis, postgres)
-- [ ] `POST /api/v1/signals` validates schema and enqueues to Redis Stream
-- [ ] Worker consumes from queue and writes `events.status = enriched` (stub enrichment)
-- [ ] Evaluation stub writes one `model_decisions` row with deterministic response
-- [ ] WebSocket broadcasts the stub decision to connected clients
-- [ ] `GET /health` returns ok
-- [ ] `GET /ready` shows queue lag and confirms redis/postgres connectivity
+- [x] `docker compose up` starts all services (gateway, worker, redis, postgres)
+- [x] `POST /api/v1/signals` validates schema and enqueues to Redis Stream
+- [x] Worker consumes from queue and writes `events.status = enriched` (stub enrichment)
+- [x] Evaluation stub writes one `model_decisions` row with deterministic response
+- [x] WebSocket broadcasts the stub decision to connected clients
+- [x] `GET /health` returns ok
+- [x] `GET /ready` shows queue lag and confirms redis/postgres connectivity
 
 ### 1.2 Minimal Components for Phase 1
 
@@ -62,52 +62,54 @@ Phase 1 is DONE only when:
 - [x] Return event_id
 
 #### 1.3.3 Redis Queue
-- [ ] Initialize Redis Stream and consumer group on startup
-- [ ] Producer: enqueue signal with event_id, payload, timestamp
-- [ ] Consumer: read from stream with XREADGROUP
+- [x] Initialize Redis Stream and consumer group on startup
+- [x] Producer: enqueue signal with event_id, payload, timestamp
+- [x] Consumer: read from stream with XREADGROUP
 
 #### 1.3.4 Worker (Stub)
-- [ ] Consume from `lens:signals:pending`
-- [ ] **Stub Enrichment**: Add `mid_price` from signal's `entry_price` (no real provider)
-- [ ] Update `events.status = 'enriched'`, set `enriched_at`
-- [ ] **Stub Evaluation**: Return deterministic decision:
+- [x] Consume from `lens:signals:pending`
+- [x] **Stub Enrichment**: Add `mid_price` from signal's `entry_price` (no real provider)
+- [x] Update `events.status = 'enriched'`, set `enriched_at`
+- [x] **Stub Evaluation**: Return deterministic decision:
   ```json
   {
-    "decision": "IGNORE",
-    "confidence": 0.5,
-    "reasons": ["stub_evaluation"],
-    "model_meta": {"model_name": "stub", "latency_ms": 10, "status": "SUCCESS"}
+    "decision": "FOLLOW_ENTER",
+    "confidence": 0.75,
+    "reasons": ["bullish_trend", "ema_bullish_stack", "funding_favorable", "good_rr_ratio"],
+    "model_meta": {"model_name": "chatgpt", "latency_ms": 10, "status": "SUCCESS"}
   }
   ```
-- [ ] Write to `model_decisions` table
-- [ ] Update `events.status = 'evaluated'`, set `evaluated_at`
-- [ ] Trigger WebSocket publish
+- [x] Write to `model_decisions` table
+- [x] Update `events.status = 'evaluated'`, set `evaluated_at`
+- [x] Trigger WebSocket publish
 
 #### 1.3.5 WebSocket Publisher (Minimal)
-- [ ] WebSocket endpoint at `/ws/decisions`
-- [ ] Accept connections (no auth in Phase 1)
-- [ ] Broadcast all decisions to all connected clients
-- [ ] Update `events.status = 'published'`, set `published_at`
+- [x] WebSocket endpoint at `/api/v1/ws/stream`
+- [x] Accept connections (network-level security)
+- [x] Broadcast all decisions to matching subscribers
+- [x] Update `events.status = 'published'`, set `published_at`
 
 #### 1.3.6 Health Endpoints
-- [ ] `GET /health` - Return {"status": "ok"}
-- [ ] `GET /ready` - Check Redis ping, Postgres connectivity, return queue depth
+- [x] `GET /health` - Return {"status": "ok"}
+- [x] `GET /ready` - Check Redis ping, Postgres connectivity, return queue depth
+- [x] `GET /queue/depth` - Return current queue depths
+- [x] `GET /metrics` - Prometheus metrics endpoint
 
 #### 1.3.7 Docker Compose
-- [ ] Configure all services: gateway, worker, redis, postgres
-- [ ] Verify startup order with health checks
-- [ ] Test `docker compose up` brings up working system
+- [x] Configure all services: gateway, worker, redis, postgres
+- [x] Verify startup order with health checks
+- [x] Test `docker compose up` brings up working system
 
 ### 1.4 Phase 1 Testing
 
-- [ ] Manual test: POST signal → verify WebSocket receives decision
-- [ ] Verify database has event with status='published'
-- [ ] Verify all lifecycle timestamps populated
-- [ ] Simple integration test script
+- [x] Manual test: POST signal → verify WebSocket receives decision
+- [x] Verify database has event with status='published'
+- [x] Verify all lifecycle timestamps populated
+- [x] Unit tests for all components (70+ tests passing)
 
 ---
 
-## Phase 2: Signal Gateway (Production-Ready)
+## Phase 2: Signal Gateway (Production-Ready) 🔶 PARTIAL
 
 **Goal**: Harden the gateway with rate limiting and error handling.
 
@@ -117,31 +119,33 @@ Phase 1 is DONE only when:
 - [x] External requests rejected at application level
 
 ### 2.2 Rate Limiting
-- [ ] Redis-based sliding window limiter
-- [ ] 60 req/min, burst 120
-- [ ] Per-client rate limiting
-- [ ] Return 429 with Retry-After header
+- [x] Redis-based sliding window limiter (implemented in `rate_limit.py`)
+- [x] 60 req/min, burst 120 (configurable via env)
+- [x] Per-client rate limiting logic
+- [ ] **GAP**: Rate limiter not integrated into signal endpoint middleware
+- [ ] **GAP**: Return 429 with Retry-After header not implemented
 
 ### 2.4 Idempotency
-- [ ] Accept optional `idempotency_key` in request
-- [ ] Reject duplicate signals with same idempotency_key
-- [ ] Return existing event_id for duplicates
+- [x] Accept optional `idempotency_key` in request (X-Idempotency-Key header)
+- [x] Reject duplicate signals with same idempotency_key
+- [x] Return existing event_id for duplicates
 
 ### 2.5 Event Query Endpoints
-- [ ] `GET /api/v1/events` - List with filters
-- [ ] `GET /api/v1/events/{event_id}` - Full details with timeline
-- [ ] `GET /api/v1/events/{event_id}/status` - Current status
+- [x] `GET /api/v1/events` - Endpoint exists with filter parameters
+- [ ] **GAP**: `GET /api/v1/events` - Database query not implemented (returns empty)
+- [ ] **GAP**: `GET /api/v1/events/{event_id}` - Raises NotImplementedError
+- [ ] **GAP**: `GET /api/v1/events/{event_id}/status` - Returns stub data
 
 ### 2.6 Error Handling
-- [ ] Structured error responses
-- [ ] Validation error details
-- [ ] Request ID tracking
+- [x] Basic structured error responses
+- [x] Validation error details (Pydantic)
+- [ ] **GAP**: Request ID tracking not implemented
 
 ### 2.7 Phase 2 Deliverables
-- [ ] Full authentication flow working
-- [ ] Rate limiting active
-- [ ] All gateway endpoints implemented
-- [ ] Swagger UI functional for API testing
+- [x] Network security working (no auth needed)
+- [ ] **GAP**: Rate limiting not active on endpoints
+- [ ] **GAP**: Event query endpoints not functional
+- [x] Swagger UI functional for API testing
 
 ---
 
@@ -266,28 +270,29 @@ Phase 1 is DONE only when:
 
 ---
 
-## Phase 5: Polish & Hardening
+## Phase 5: Polish & Hardening 🔶 PARTIAL
 
 **Goal**: Production-ready observability, performance, and deployment.
 
 ### 5.1 Prometheus Metrics
-- [ ] Signal counters (received, enqueued, enriched, evaluated, published)
-- [ ] Latency histograms (enqueue, enrichment, evaluation, E2E)
-- [ ] Queue depth gauges
-- [ ] Error counters (DLQ, model errors)
-- [ ] WebSocket connection gauge
-- [ ] `/metrics` endpoint
+- [x] Signal counters (received, enqueued, enriched, evaluated, published)
+- [x] Latency histograms (enqueue, enrichment, evaluation)
+- [x] Queue depth gauges
+- [x] Error counters (DLQ, model errors, rejections)
+- [x] WebSocket connection gauge
+- [x] `/metrics` endpoint
 
 ### 5.2 Structured Logging
-- [ ] JSON log format
-- [ ] event_id as trace ID across all logs
-- [ ] Stage transitions logged (RECEIVED → ENQUEUED → ENRICHED → ...)
-- [ ] Log levels configured via env
+- [x] JSON log format (configurable via LOG_FORMAT env)
+- [x] event_id as trace ID across all logs
+- [x] Stage transitions logged (RECEIVED → ENQUEUED → ENRICHED → ...)
+- [x] Log levels configured via env (LOG_LEVEL)
 
 ### 5.3 Audit Endpoints
-- [ ] `GET /api/v1/decisions` - Query decisions with filters
-- [ ] `GET /api/v1/dlq` - Query DLQ entries
-- [ ] `POST /api/v1/dlq/{id}/retry` - Retry DLQ entry
+- [x] `GET /api/v1/decisions` - Endpoint exists with filter parameters
+- [ ] **GAP**: `GET /api/v1/decisions` - Database query not implemented (returns empty)
+- [ ] **GAP**: `GET /api/v1/dlq` - Not implemented
+- [ ] **GAP**: `POST /api/v1/dlq/{id}/retry` - Not implemented
 
 ### 5.4 WebSocket Enhancement
 - [x] Subscription filters (model, symbol, event_type)
@@ -305,13 +310,14 @@ Phase 1 is DONE only when:
 - [ ] Stress test queue depth
 
 ### 5.6 Docker Optimization
-- [ ] Multi-stage Dockerfile
-- [ ] Resource limits configured
-- [ ] Health check probes
-- [ ] Graceful shutdown handling
+- [x] Dockerfile configured
+- [ ] **GAP**: Multi-stage Dockerfile for smaller image
+- [ ] **GAP**: Resource limits configured
+- [x] Health check probes (gateway)
+- [ ] **GAP**: Graceful shutdown handling
 
 ### 5.7 Phase 5 Deliverables
-- [ ] Full observability stack
+- [x] Metrics and logging implemented
 - [ ] Load tested and verified
 - [ ] Production-ready Docker config
 - [ ] Operations documentation
@@ -391,27 +397,74 @@ Phase 1 is DONE only when:
 
 ## Success Criteria
 
-### Phase 1 (E2E Skeleton)
-- [ ] Full signal flow working with stubs
-- [ ] Docker compose up → working system
-- [ ] Can POST signal, receive decision on WebSocket
+### Phase 1 (E2E Skeleton) ✅ COMPLETE
+- [x] Full signal flow working with stubs
+- [x] Docker compose up → working system
+- [x] Can POST signal, receive decision on WebSocket
 
-### Phase 2 (Gateway)
-- [ ] Auth, rate limiting, idempotency working
-- [ ] All API endpoints functional in Swagger
+### Phase 2 (Gateway) 🔶 PARTIAL
+- [x] Network security working (no auth needed)
+- [x] Idempotency working
+- [ ] Rate limiting not active on endpoints
+- [ ] Event query endpoints return stubs
 
-### Phase 3 (Enrichment) ✅
+### Phase 3 (Enrichment) ✅ COMPLETE
 - [x] Real Hyperliquid data flowing
 - [x] TA indicators verified correct
 - [x] Quality flags detecting issues
 - [x] Signal validation rejecting invalid signals
 
 ### Phase 4 (AI Evaluation)
-- [ ] ChatGPT + Gemini producing decisions
+- [ ] ChatGPT + Gemini + Claude + DeepSeek producing real decisions
 - [ ] Invalid outputs handled gracefully
 - [ ] Prompt versioning tracked
 
-### Phase 5 (Polish)
-- [ ] All p95 latency targets met
-- [ ] Metrics dashboard showing healthy system
-- [ ] 24h soak test passed
+### Phase 5 (Polish) 🔶 PARTIAL
+- [x] Metrics and structured logging implemented
+- [x] WebSocket enhancements done
+- [ ] Audit query endpoints not functional
+- [ ] Load testing not done
+
+---
+
+## Identified Gaps Summary
+
+This section lists all identified gaps that need to be addressed before the MVP is complete.
+
+### High Priority (Phase 4 - Required for MVP)
+
+| Gap | Location | Description |
+|-----|----------|-------------|
+| Real AI Evaluation | `evaluation_worker.py` | Currently uses stub decisions; need real ChatGPT/Gemini/Claude/DeepSeek integration |
+| Model Interface | `services/evaluation/` | Abstract base class for AI models not implemented |
+| Prompt Management | `services/evaluation/` | Prompt loading exists but version tracking not active |
+| Output Validation | `evaluation_worker.py` | Parse and validate AI response against ModelDecision schema |
+| Parallel Evaluation | `evaluation_worker.py` | Run models concurrently (currently sequential) |
+
+### Medium Priority (Phase 2 Gaps)
+
+| Gap | Location | Description |
+|-----|----------|-------------|
+| Rate Limiting Integration | `api/v1/signals.py` | RateLimiter class exists but not integrated into endpoint middleware |
+| Event Query - List | `api/v1/events.py:list_events()` | Returns empty list; needs database query implementation |
+| Event Query - Detail | `api/v1/events.py:get_event()` | Raises NotImplementedError |
+| Event Query - Status | `api/v1/events.py:get_event_status()` | Returns stub data |
+| Request ID Tracking | `api/` | No request ID middleware for tracing |
+
+### Low Priority (Phase 5 Gaps)
+
+| Gap | Location | Description |
+|-----|----------|-------------|
+| Decision Query | `api/v1/decisions.py` | Endpoint exists but returns empty; needs DB query |
+| DLQ Endpoints | `api/v1/` | `GET /dlq` and `POST /dlq/{id}/retry` not implemented |
+| Multi-stage Dockerfile | `Dockerfile` | Optimize image size |
+| Resource Limits | `docker-compose.yml` | Add memory/CPU limits |
+| Graceful Shutdown | `workers/` | Handle SIGTERM properly |
+| Load Testing | `tests/` | Performance test scripts needed |
+
+### Optional (Nice to Have)
+
+| Gap | Location | Description |
+|-----|----------|-------------|
+| Support/Resistance | `ta_calculator.py` | Level detection for full_v1 profile |
+| Order Book Imbalance | `ta_calculator.py` | OBI calculation for full_v1 profile |
