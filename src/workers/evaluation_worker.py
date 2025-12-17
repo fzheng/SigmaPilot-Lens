@@ -124,7 +124,7 @@ class EvaluationWorker(QueueConsumer):
             # Get models to evaluate
             models = settings.ai_models_list
 
-            if settings.USE_REAL_AI:
+            if settings.use_real_ai:
                 # Parallel evaluation with real AI models
                 decisions = await self._evaluate_parallel(event_id, payload, models)
             else:
@@ -159,7 +159,7 @@ class EvaluationWorker(QueueConsumer):
                     details={
                         "models": [m for m, _ in decisions],
                         "duration_ms": int((time.time() - start_time) * 1000),
-                        "mode": "real" if settings.USE_REAL_AI else "stub",
+                        "mode": "real" if settings.use_real_ai else "stub",
                     },
                 )
                 db.add(timeline)

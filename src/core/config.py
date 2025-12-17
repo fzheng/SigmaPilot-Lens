@@ -70,8 +70,9 @@ class Settings(BaseSettings):
 
     # AI Models
     AI_MODELS: str = "chatgpt,gemini"
-    # REQUIRED: Must explicitly set to true (production) or false (stub mode for testing)
-    # No default - forces explicit choice to prevent accidental stub decisions in production
+    # IMPORTANT: Must explicitly set to true (production) or false (stub mode for testing)
+    # Defaults to None - validated at runtime when accessed via use_real_ai property
+    # This allows scripts/migrations to import config without crashing
     USE_REAL_AI: Optional[bool] = Field(
         default=None,
         description="Must be explicitly set: true for real AI, false for stub decisions"
@@ -99,6 +100,21 @@ class Settings(BaseSettings):
         """Parse AI_MODELS into a list."""
         return [m.strip() for m in self.AI_MODELS.split(",")]
 
+    @property
+    def use_real_ai(self) -> bool:
+        """Get USE_REAL_AI with deferred validation.
+
+        Raises ValueError at access time if not explicitly set, allowing
+        scripts/migrations that don't need this setting to import config.
+        """
+        if self.USE_REAL_AI is None:
+            raise ValueError(
+                "USE_REAL_AI must be explicitly set to 'true' or 'false'. "
+                "Set USE_REAL_AI=true for production (real AI models) or "
+                "USE_REAL_AI=false for development (stub decisions)."
+            )
+        return self.USE_REAL_AI
+
     @field_validator("LOG_LEVEL")
     @classmethod
     def validate_log_level(cls, v: str) -> str:
@@ -116,18 +132,6 @@ class Settings(BaseSettings):
         valid_profiles = {"trend_follow_v1", "crypto_perps_v1", "full_v1"}
         if v not in valid_profiles:
             raise ValueError(f"FEATURE_PROFILE must be one of {valid_profiles}")
-        return v
-
-    @field_validator("USE_REAL_AI")
-    @classmethod
-    def validate_use_real_ai(cls, v: Optional[bool]) -> bool:
-        """Validate USE_REAL_AI is explicitly set."""
-        if v is None:
-            raise ValueError(
-                "USE_REAL_AI must be explicitly set to 'true' or 'false'. "
-                "Set USE_REAL_AI=true for production (real AI models) or "
-                "USE_REAL_AI=false for development (stub decisions)."
-            )
         return v
 
 
