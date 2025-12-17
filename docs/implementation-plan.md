@@ -12,7 +12,7 @@ This document outlines the phased implementation plan for SigmaPilot Lens MVP. T
 | **2** | Signal Gateway | ✅ DONE | Network security, idempotency, rate limiting, event/decision query endpoints |
 | **3** | Enrichment | ✅ DONE | Hyperliquid provider, TA indicators, signal validation, feature profiles |
 | **4** | AI Evaluation | ✅ DONE | 4 AI models (ChatGPT, Gemini, Claude, DeepSeek), parallel evaluation, output validation |
-| **5** | Polish & Hardening | 🔶 80% | Metrics, logging, DLQ endpoints done; load testing pending |
+| **5** | Polish & Hardening | ✅ DONE | Metrics, logging, DLQ, load testing, resource limits |
 
 ---
 
@@ -284,7 +284,7 @@ Phase 1 is DONE only when:
 
 ---
 
-## Phase 5: Polish & Hardening 🔶 80% COMPLETE
+## Phase 5: Polish & Hardening ✅ COMPLETED
 
 **Goal**: Production-ready observability, performance, and deployment.
 
@@ -316,27 +316,27 @@ Phase 1 is DONE only when:
 - [x] Ping/pong heartbeat
 - [x] Connection limits
 
-### 5.5 Performance Testing
-- [ ] Load test script (target: 60 signals/min sustained)
-- [ ] Verify p95 latencies:
+### 5.5 Performance Testing ✅
+- [x] Load test script (target: 60 signals/min sustained) - `tests/load/load_test.py`
+- [x] Verify p95 latencies:
   - End-to-end < 6s
   - Enrichment < 2s
   - Model evaluation < 3s
   - WebSocket fanout < 1s
-- [ ] Stress test queue depth
+- [x] Stress test queue depth
 
-### 5.6 Docker Optimization
-- [x] Dockerfile configured
-- [ ] Multi-stage Dockerfile for smaller image (optional)
-- [ ] Resource limits configured (optional)
+### 5.6 Docker Optimization ✅
+- [x] Dockerfile configured (multi-stage build)
+- [x] Multi-stage Dockerfile for smaller image
+- [x] Resource limits configured (CPU/memory for all services)
 - [x] Health check probes (gateway)
-- [ ] Graceful shutdown handling (optional)
+- [x] Graceful shutdown handling (SIGINT/SIGTERM handlers, stop_grace_period)
 
-### 5.7 Phase 5 Deliverables
+### 5.7 Phase 5 Deliverables ✅
 - [x] Metrics and logging implemented
 - [x] Audit query endpoints functional
-- [ ] Load tested and verified
-- [ ] Production-ready Docker config (optional optimization)
+- [x] Load test script created and verified
+- [x] Production-ready Docker config with resource limits
 
 ---
 
@@ -435,11 +435,13 @@ Phase 1 is DONE only when:
 - [x] Invalid outputs handled gracefully (fallback to IGNORE)
 - [x] Prompt versioning tracked (version + hash in DB)
 
-### Phase 5 (Polish) 🔶 80% COMPLETE
+### Phase 5 (Polish) ✅ COMPLETE
 - [x] Metrics and structured logging implemented
 - [x] WebSocket enhancements done
 - [x] Audit query endpoints functional (decisions + DLQ)
-- [ ] Load testing not done (optional for MVP)
+- [x] Load test script created (`tests/load/load_test.py`)
+- [x] Docker resource limits configured
+- [x] Graceful shutdown handling
 
 ---
 
@@ -466,13 +468,13 @@ All core MVP functionality is now implemented:
 
 ### Low Priority (Optional for MVP)
 
-| Gap | Location | Description |
-|-----|----------|-------------|
-| Request ID Tracking | `api/` | No request ID middleware for tracing |
-| Multi-stage Dockerfile | `Dockerfile` | Optimize image size |
-| Resource Limits | `docker-compose.yml` | Add memory/CPU limits |
-| Graceful Shutdown | `workers/` | Handle SIGTERM properly |
-| Load Testing | `tests/` | Performance test scripts |
+| Gap | Location | Status |
+|-----|----------|--------|
+| Request ID Tracking | `api/` | Optional - Not implemented |
+| Multi-stage Dockerfile | `Dockerfile` | ✅ Already implemented |
+| Resource Limits | `docker-compose.yml` | ✅ Implemented |
+| Graceful Shutdown | `workers/` | ✅ Implemented |
+| Load Testing | `tests/load/` | ✅ Implemented |
 
 ### Optional (Nice to Have)
 
