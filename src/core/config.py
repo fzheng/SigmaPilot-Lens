@@ -70,6 +70,8 @@ class Settings(BaseSettings):
 
     # AI Models
     AI_MODELS: str = "chatgpt,gemini"
+    # Set USE_REAL_AI=true for production, false for testing with stub decisions
+    USE_REAL_AI: bool = False
 
     # WebSocket
     WS_ENABLED: bool = True

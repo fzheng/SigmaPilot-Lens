@@ -5,10 +5,13 @@ import json
 import random
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 
 from src.core.config import settings
+from src.observability.logging import get_logger
 from src.services.queue.redis_client import RedisClient
+
+logger = get_logger(__name__)
 
 
 class QueueConsumer(ABC):
@@ -145,16 +148,66 @@ class QueueConsumer(ABC):
         fields: Dict[str, str],
         error_message: str,
     ) -> None:
-        """Send failed message to dead letter queue."""
-        dlq_entry = {
-            "event_id": event_id,
-            "original_payload": fields.get("payload", "{}"),
-            "error_message": error_message,
-            "retry_count": fields.get("retry_count", "0"),
-            "failed_at": datetime.now(timezone.utc).isoformat(),
-            "stage": self._get_stage_name(),
-        }
-        await self.redis.xadd("lens:dlq", dlq_entry)
+        """Send failed message to dead letter queue (PostgreSQL).
+
+        Persists to dlq_entries table for API access and retry/resolve operations.
+        """
+        from src.models.database import get_db_context
+        from src.models.orm.dlq import DLQEntry
+
+        stage = self._get_stage_name()
+        retry_count = int(fields.get("retry_count", "0"))
+
+        # Parse payload from JSON string
+        try:
+            payload = json.loads(fields.get("payload", "{}"))
+        except json.JSONDecodeError:
+            payload = {"raw": fields.get("payload", "")}
+
+        # Determine reason code from error message
+        reason_code = self._classify_error(error_message)
+
+        try:
+            async with get_db_context() as db:
+                dlq_entry = DLQEntry(
+                    event_id=event_id if event_id else None,
+                    stage=stage,
+                    reason_code=reason_code,
+                    error_message=error_message[:4000],  # Truncate if too long
+                    payload=payload,
+                    retry_count=retry_count,
+                )
+                db.add(dlq_entry)
+                await db.commit()
+                logger.info(f"DLQ entry created for event {event_id}, stage={stage}, reason={reason_code}")
+        except Exception as e:
+            logger.error(f"Failed to persist DLQ entry: {e}")
+            # Fall back to Redis stream if DB fails
+            dlq_data = {
+                "event_id": event_id,
+                "original_payload": fields.get("payload", "{}"),
+                "error_message": error_message,
+                "retry_count": str(retry_count),
+                "failed_at": datetime.now(timezone.utc).isoformat(),
+                "stage": stage,
+            }
+            await self.redis.xadd("lens:dlq", dlq_data)
+
+    def _classify_error(self, error_message: str) -> str:
+        """Classify error message into a reason code."""
+        msg_lower = error_message.lower()
+        if "timeout" in msg_lower:
+            return "timeout"
+        elif "rate limit" in msg_lower or "429" in msg_lower:
+            return "rate_limited"
+        elif "connection" in msg_lower or "network" in msg_lower:
+            return "network_error"
+        elif "validation" in msg_lower or "schema" in msg_lower:
+            return "validation_error"
+        elif "provider" in msg_lower or "api" in msg_lower:
+            return "provider_error"
+        else:
+            return "processing_error"
 
     @abstractmethod
     def _get_stage_name(self) -> str:

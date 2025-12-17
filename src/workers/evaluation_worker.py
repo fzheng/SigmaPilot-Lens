@@ -12,6 +12,7 @@ Features:
 
 Configuration:
     AI_MODELS: Comma-separated list of models to use (e.g., "chatgpt,gemini,claude")
+    USE_REAL_AI: Set to true for real AI evaluation, false for stub mode (default: false)
     MODEL_{NAME}_*: Per-model configuration (API_KEY, MODEL_ID, TIMEOUT_MS, etc.)
 
 Usage:
@@ -20,7 +21,6 @@ Usage:
 """
 
 import asyncio
-import os
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -47,10 +47,6 @@ from src.services.queue import QueueConsumer, RedisClient
 
 logger = get_logger(__name__)
 
-# Environment variable to enable/disable real AI evaluation
-# Set to "true" to use real AI models, "false" or unset for stub mode
-USE_REAL_AI = os.getenv("USE_REAL_AI", "false").lower() == "true"
-
 
 class EvaluationWorker(QueueConsumer):
     """Worker that evaluates enriched signals using AI models.
@@ -59,7 +55,7 @@ class EvaluationWorker(QueueConsumer):
         1. Stub mode (default): Returns deterministic stub decisions
         2. Real mode: Calls actual AI models in parallel
 
-    Set USE_REAL_AI=true environment variable to enable real AI evaluation.
+    Set USE_REAL_AI=true in environment or config to enable real AI evaluation.
 
     Class Invariants:
         - Adapters are lazily initialized on first use
@@ -128,7 +124,7 @@ class EvaluationWorker(QueueConsumer):
             # Get models to evaluate
             models = settings.ai_models_list
 
-            if USE_REAL_AI:
+            if settings.USE_REAL_AI:
                 # Parallel evaluation with real AI models
                 decisions = await self._evaluate_parallel(event_id, payload, models)
             else:
@@ -163,7 +159,7 @@ class EvaluationWorker(QueueConsumer):
                     details={
                         "models": [m for m, _ in decisions],
                         "duration_ms": int((time.time() - start_time) * 1000),
-                        "mode": "real" if USE_REAL_AI else "stub",
+                        "mode": "real" if settings.USE_REAL_AI else "stub",
                     },
                 )
                 db.add(timeline)

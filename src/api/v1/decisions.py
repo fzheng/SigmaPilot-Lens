@@ -47,15 +47,26 @@ def _build_risk_plan(risk_plan_data: Optional[dict]) -> Optional[RiskPlan]:
 
 
 def _map_status(db_status: str) -> str:
-    """Map database status to API status."""
+    """Map database status to API status.
+
+    Handles both lowercase (legacy) and uppercase (ModelStatus enum) values.
+    """
+    # Normalize to lowercase for lookup
+    status_lower = db_status.lower() if db_status else ""
     status_map = {
         "ok": "SUCCESS",
+        "success": "SUCCESS",
         "invalid_json": "SCHEMA_ERROR",
+        "schema_error": "SCHEMA_ERROR",
+        "validation_failed": "SCHEMA_ERROR",
         "timeout": "TIMEOUT",
         "provider_error": "API_ERROR",
+        "api_error": "API_ERROR",
         "rate_limited": "RATE_LIMITED",
+        "network_error": "NETWORK_ERROR",
+        "invalid_config": "INVALID_CONFIG",
     }
-    return status_map.get(db_status, "API_ERROR")
+    return status_map.get(status_lower, "API_ERROR")
 
 
 @router.get(

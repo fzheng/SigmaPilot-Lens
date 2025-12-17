@@ -59,14 +59,6 @@ class EnrichmentService:
         "max_leverage": 10,
     }
 
-    # Staleness thresholds in seconds
-    STALENESS_THRESHOLDS = {
-        "ticker": 10,  # 10 seconds
-        "candles": 300,  # 5 minutes
-        "orderbook": 5,  # 5 seconds
-        "funding": 60,  # 1 minute
-    }
-
     def __init__(self, provider: Optional[HyperliquidProvider] = None):
         """
         Initialize enrichment service.
@@ -75,16 +67,30 @@ class EnrichmentService:
             provider: Market data provider (defaults to HyperliquidProvider)
         """
         self.provider = provider or HyperliquidProvider()
-        self._profile_config: Optional[Dict] = None
+        self._profile_cache: Dict[str, Dict] = {}  # Cache keyed by profile name
+
+    @property
+    def staleness_thresholds(self) -> Dict[str, int]:
+        """Get staleness thresholds from settings."""
+        return {
+            "ticker": settings.STALE_MID_S,
+            "candles": settings.STALE_MID_S * settings.STALE_CANDLE_MULTIPLIER,
+            "orderbook": settings.STALE_L2_S,
+            "funding": settings.STALE_CTX_S,
+        }
 
     async def close(self):
         """Close the provider connection."""
         await self.provider.close()
 
     def _load_profile_config(self, profile_name: str) -> Dict:
-        """Load feature profile configuration."""
-        if self._profile_config is not None:
-            return self._profile_config
+        """Load feature profile configuration.
+
+        Caches profiles by name to support switching profiles at runtime.
+        """
+        # Check cache for this specific profile
+        if profile_name in self._profile_cache:
+            return self._profile_cache[profile_name]
 
         try:
             with open("config/feature_profiles.yaml", "r") as f:
@@ -104,7 +110,8 @@ class EnrichmentService:
                             merged[key] = parent[key] + config[key]
                 config = merged
 
-            self._profile_config = config
+            # Cache by profile name
+            self._profile_cache[profile_name] = config
             return config
 
         except Exception as e:
@@ -120,8 +127,10 @@ class EnrichmentService:
         """
         Check data freshness against staleness thresholds.
 
+        Uses thresholds from settings (STALE_MID_S, STALE_L2_S, STALE_CTX_S).
         Adds stale data sources to quality_flags.stale.
         """
+        thresholds = self.staleness_thresholds
         for ts_key, ts_value in data_timestamps.items():
             try:
                 # Parse timestamp
@@ -134,13 +143,13 @@ class EnrichmentService:
                 age_seconds = (now - ts).total_seconds()
 
                 if "candles" in ts_key:
-                    threshold = self.STALENESS_THRESHOLDS["candles"]
+                    threshold = thresholds["candles"]
                 elif "funding" in ts_key:
-                    threshold = self.STALENESS_THRESHOLDS["funding"]
+                    threshold = thresholds["funding"]
                 elif "mid" in ts_key or "ticker" in ts_key:
-                    threshold = self.STALENESS_THRESHOLDS["ticker"]
+                    threshold = thresholds["ticker"]
                 else:
-                    threshold = self.STALENESS_THRESHOLDS.get("orderbook", 10)
+                    threshold = thresholds.get("orderbook", 10)
 
                 if age_seconds > threshold:
                     quality_flags.stale.append(f"{ts_key}: {int(age_seconds)}s old (threshold: {threshold}s)")
