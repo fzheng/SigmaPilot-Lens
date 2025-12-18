@@ -1,7 +1,8 @@
 """WebSocket endpoint for real-time decision streaming."""
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
+from src.core.auth import AuthContext, get_websocket_auth_context, require_read, Scope
 from src.core.config import settings
 from src.observability.logging import get_logger
 from src.services.publisher.ws_server import handle_websocket, ws_manager
@@ -16,7 +17,16 @@ async def websocket_endpoint(websocket: WebSocket):
     """
     WebSocket endpoint for streaming AI decisions in real-time.
 
-    Access is restricted to internal Docker network only (network-level security).
+    ## Authentication
+
+    When AUTH_MODE is 'psk' or 'jwt', authenticate via the Sec-WebSocket-Protocol header:
+
+    ```
+    Sec-WebSocket-Protocol: bearer,<token>
+    ```
+
+    The server will echo back "bearer" in the response protocol if auth succeeds.
+    Requires `lens:read` scope.
 
     ## Connection
 
@@ -77,14 +87,26 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.close(code=1000, reason="WebSocket disabled")
         return
 
+    # Check authentication for WebSocket
+    auth = await get_websocket_auth_context(websocket)
+    if settings.AUTH_MODE != "none":
+        if not auth.authenticated:
+            await websocket.close(code=4001, reason="Authentication required")
+            return
+        if not auth.has_scope(Scope.READ):
+            await websocket.close(code=4003, reason="Insufficient permissions")
+            return
+
     # Check max connections
     if len(ws_manager.subscriptions) >= settings.WS_MAX_CONNECTIONS:
         await websocket.close(code=4029, reason="Too many connections")
         return
 
     # Handle the WebSocket connection
+    # If auth was via bearer protocol, we need to accept with that subprotocol
+    subprotocol = "bearer" if auth.token_type else None
     try:
-        await handle_websocket(websocket)
+        await handle_websocket(websocket, subprotocol=subprotocol)
     except WebSocketDisconnect:
         pass
     except Exception as e:

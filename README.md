@@ -25,14 +25,56 @@ SigmaPilot Lens analyzes trading signals in real-time using multiple AI models a
 ```bash
 # Setup
 cp .env.example .env
-# Add your AI API keys to .env
+# Edit .env: set AUTH_MODE and configure tokens
 
 # Run
 make build && make up && make migrate
 
+# Configure AI models via API (requires admin token)
+curl -X PUT http://localhost:8000/api/v1/llm-configs/chatgpt \
+  -H "Authorization: Bearer <your-admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"api_key": "sk-...", "enabled": true}'
+
 # Verify
 make health
 ```
+
+## Authentication
+
+SigmaPilot Lens supports 3 authentication modes:
+
+| Mode | Use Case | Configuration |
+|------|----------|---------------|
+| `none` | Development | No auth required |
+| `psk` | Docker Compose | Pre-shared key tokens |
+| `jwt` | Production | External identity provider |
+
+### Scopes
+
+| Scope | Access |
+|-------|--------|
+| `lens:submit` | Submit signals |
+| `lens:read` | Read events, decisions, DLQ |
+| `lens:admin` | Admin operations + all above |
+
+### PSK Mode Example
+
+```bash
+# .env
+AUTH_MODE=psk
+AUTH_TOKEN_SUBMIT=<generate-with-secrets.token_urlsafe(32)>
+AUTH_TOKEN_READ=<generate-with-secrets.token_urlsafe(32)>
+AUTH_TOKEN_ADMIN=<generate-with-secrets.token_urlsafe(32)>
+
+# Usage
+curl -X POST http://localhost:8000/api/v1/signals \
+  -H "Authorization: Bearer <submit-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"symbol": "BTC-PERP", ...}'
+```
+
+See [Configuration Guide](docs/configuration.md#authentication) for full details.
 
 ## Documentation
 

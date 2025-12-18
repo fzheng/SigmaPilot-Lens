@@ -69,13 +69,48 @@ class Settings(BaseSettings):
     HYPERLIQUID_WS_URL: str = "wss://api.hyperliquid.xyz/ws"
 
     # AI Models
-    AI_MODELS: str = "chatgpt,gemini"
     # IMPORTANT: Must explicitly set to true (production) or false (stub mode for testing)
     # Defaults to None - validated at runtime when accessed via use_real_ai property
     # This allows scripts/migrations to import config without crashing
+    # LLM configurations are managed via /api/v1/llm-configs endpoints
     USE_REAL_AI: Optional[bool] = Field(
         default=None,
         description="Must be explicitly set: true for real AI, false for stub decisions"
+    )
+
+    # Authentication
+    # AUTH_MODE: none (dev), psk (pre-shared keys), jwt (portable)
+    AUTH_MODE: str = Field(
+        default="none",
+        description="Authentication mode: none (dev), psk (pre-shared keys), jwt (portable)"
+    )
+
+    # PSK Mode tokens (each grants its associated scope)
+    AUTH_TOKEN_SUBMIT: Optional[str] = Field(
+        default=None, description="PSK token for lens:submit scope"
+    )
+    AUTH_TOKEN_READ: Optional[str] = Field(
+        default=None, description="PSK token for lens:read scope"
+    )
+    AUTH_TOKEN_ADMIN: Optional[str] = Field(
+        default=None, description="PSK token for lens:admin scope (includes all)"
+    )
+
+    # JWT Mode configuration
+    AUTH_JWT_PUBLIC_KEY: Optional[str] = Field(
+        default=None, description="PEM-encoded public key for JWT validation"
+    )
+    AUTH_JWT_JWKS_URL: Optional[str] = Field(
+        default=None, description="URL to JWKS endpoint for JWT validation"
+    )
+    AUTH_JWT_ISSUER: Optional[str] = Field(
+        default=None, description="Expected JWT issuer claim"
+    )
+    AUTH_JWT_AUDIENCE: Optional[str] = Field(
+        default=None, description="Expected JWT audience claim"
+    )
+    AUTH_JWT_SCOPE_CLAIM: str = Field(
+        default="scope", description="JWT claim containing scopes"
     )
 
     # WebSocket
@@ -94,11 +129,6 @@ class Settings(BaseSettings):
     def timeframes_list(self) -> List[str]:
         """Parse TIMEFRAMES into a list."""
         return [tf.strip() for tf in self.TIMEFRAMES.split(",")]
-
-    @property
-    def ai_models_list(self) -> List[str]:
-        """Parse AI_MODELS into a list."""
-        return [m.strip() for m in self.AI_MODELS.split(",")]
 
     @property
     def use_real_ai(self) -> bool:
@@ -134,38 +164,15 @@ class Settings(BaseSettings):
             raise ValueError(f"FEATURE_PROFILE must be one of {valid_profiles}")
         return v
 
-
-class ModelConfig(BaseSettings):
-    """Per-model configuration loaded dynamically."""
-
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=True,
-        extra="ignore",
-    )
-
-    provider: str
-    api_key: str
-    model_id: str
-    timeout_ms: int = 30000
-    max_tokens: int = 1000
-    prompt_path: Optional[str] = None
-
+    @field_validator("AUTH_MODE")
     @classmethod
-    def for_model(cls, model_name: str) -> "ModelConfig":
-        """Load configuration for a specific model."""
-        import os
-
-        prefix = f"MODEL_{model_name.upper()}_"
-        return cls(
-            provider=os.getenv(f"{prefix}PROVIDER", ""),
-            api_key=os.getenv(f"{prefix}API_KEY", ""),
-            model_id=os.getenv(f"{prefix}MODEL_ID", ""),
-            timeout_ms=int(os.getenv(f"{prefix}TIMEOUT_MS", "30000")),
-            max_tokens=int(os.getenv(f"{prefix}MAX_TOKENS", "1000")),
-            prompt_path=os.getenv(f"{prefix}PROMPT_PATH"),
-        )
+    def validate_auth_mode(cls, v: str) -> str:
+        """Validate authentication mode."""
+        valid_modes = {"none", "psk", "jwt"}
+        v = v.lower()
+        if v not in valid_modes:
+            raise ValueError(f"AUTH_MODE must be one of {valid_modes}")
+        return v
 
 
 @lru_cache

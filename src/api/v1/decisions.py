@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from src.core.auth import AuthContext, require_read
 from src.models.database import get_db_session
 from src.models.orm.decision import ModelDecision as DecisionORM
 from src.models.orm.event import Event
@@ -86,6 +87,7 @@ async def list_decisions(
     limit: int = Query(50, ge=1, le=100, description="Max results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     db: AsyncSession = Depends(get_db_session),
+    _auth: AuthContext = Depends(require_read),
 ):
     """
     Query AI model decisions.
@@ -162,6 +164,7 @@ async def list_decisions(
 async def get_decision(
     decision_id: str,
     db: AsyncSession = Depends(get_db_session),
+    _auth: AuthContext = Depends(require_read),
 ):
     """
     Get full details of a decision.

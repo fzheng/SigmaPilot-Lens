@@ -16,6 +16,16 @@ services:
       - LOG_FORMAT=json
       - RATE_LIMIT_PER_MIN=${RATE_LIMIT_PER_MIN:-60}
       - RATE_LIMIT_BURST=${RATE_LIMIT_BURST:-120}
+      # Authentication
+      - AUTH_MODE=${AUTH_MODE:-none}
+      - AUTH_TOKEN_SUBMIT=${AUTH_TOKEN_SUBMIT:-}
+      - AUTH_TOKEN_READ=${AUTH_TOKEN_READ:-}
+      - AUTH_TOKEN_ADMIN=${AUTH_TOKEN_ADMIN:-}
+      - AUTH_JWT_PUBLIC_KEY=${AUTH_JWT_PUBLIC_KEY:-}
+      - AUTH_JWT_JWKS_URL=${AUTH_JWT_JWKS_URL:-}
+      - AUTH_JWT_ISSUER=${AUTH_JWT_ISSUER:-}
+      - AUTH_JWT_AUDIENCE=${AUTH_JWT_AUDIENCE:-}
+      - AUTH_JWT_SCOPE_CLAIM=${AUTH_JWT_SCOPE_CLAIM:-scope}
     depends_on:
       redis:
         condition: service_healthy

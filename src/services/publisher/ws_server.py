@@ -4,7 +4,7 @@ import asyncio
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, List
+from typing import Dict, List, Optional
 from uuid import uuid4
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -47,17 +47,18 @@ class WebSocketManager:
         self.subscriptions: Dict[str, Subscription] = {}
         self._lock = asyncio.Lock()
 
-    async def connect(self, websocket: WebSocket) -> str:
+    async def connect(self, websocket: WebSocket, subprotocol: Optional[str] = None) -> str:
         """
         Accept a new WebSocket connection.
 
         Args:
             websocket: FastAPI WebSocket instance
+            subprotocol: Optional subprotocol to echo back (e.g., "bearer" for auth)
 
         Returns:
             Subscription ID
         """
-        await websocket.accept()
+        await websocket.accept(subprotocol=subprotocol)
 
         sub_id = str(uuid4())
         subscription = Subscription(
@@ -221,14 +222,15 @@ class WebSocketManager:
 ws_manager = WebSocketManager()
 
 
-async def handle_websocket(websocket: WebSocket) -> None:
+async def handle_websocket(websocket: WebSocket, subprotocol: Optional[str] = None) -> None:
     """
     Handle a WebSocket connection lifecycle.
 
     Args:
         websocket: FastAPI WebSocket instance
+        subprotocol: Optional subprotocol to echo back (e.g., "bearer" for auth)
     """
-    sub_id = await ws_manager.connect(websocket)
+    sub_id = await ws_manager.connect(websocket, subprotocol=subprotocol)
 
     try:
         while True:

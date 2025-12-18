@@ -42,23 +42,26 @@ SigmaPilot Lens follows an event-driven architecture with clear separation of co
 
 - FastAPI application with async request handling
 - Schema validation using Pydantic
-- Network-level security (Docker network isolation)
+- 3-mode authentication: `none` / `psk` / `jwt`
+- Scope-based authorization (`lens:submit`, `lens:read`, `lens:admin`)
 - Rate limiting (60 req/min, burst 120)
 - Assigns `event_id`, `received_ts`, and validates `source`
 
 **Endpoints**:
-- `POST /api/v1/signals` - Submit trading signal
-- `GET /api/v1/events` - List events with filtering
-- `GET /api/v1/events/{event_id}` - Get event details with timeline
-- `GET /api/v1/events/{event_id}/status` - Get processing status
-- `GET /api/v1/decisions` - List AI decisions with filtering
-- `GET /api/v1/decisions/{id}` - Get decision details
-- `GET /api/v1/dlq` - List dead letter queue entries
-- `GET /api/v1/dlq/{id}` - Get DLQ entry details
-- `POST /api/v1/dlq/{id}/retry` - Retry failed entry
-- `POST /api/v1/dlq/{id}/resolve` - Mark entry as resolved
-- `GET /api/v1/health` - Health check
-- `GET /api/v1/ready` - Readiness check
+- `POST /api/v1/signals` - Submit trading signal (scope: `lens:submit`)
+- `GET /api/v1/events` - List events with filtering (scope: `lens:read`)
+- `GET /api/v1/events/{event_id}` - Get event details with timeline (scope: `lens:read`)
+- `GET /api/v1/events/{event_id}/status` - Get processing status (scope: `lens:read`)
+- `GET /api/v1/decisions` - List AI decisions with filtering (scope: `lens:read`)
+- `GET /api/v1/decisions/{id}` - Get decision details (scope: `lens:read`)
+- `GET /api/v1/dlq` - List dead letter queue entries (scope: `lens:read`)
+- `GET /api/v1/dlq/{id}` - Get DLQ entry details (scope: `lens:read`)
+- `POST /api/v1/dlq/{id}/retry` - Retry failed entry (scope: `lens:admin`)
+- `POST /api/v1/dlq/{id}/resolve` - Mark entry as resolved (scope: `lens:admin`)
+- `GET /api/v1/llm-configs` - List LLM configurations (scope: `lens:admin`)
+- `PUT /api/v1/llm-configs/{model}` - Configure LLM model (scope: `lens:admin`)
+- `GET /api/v1/health` - Health check (no auth)
+- `GET /api/v1/ready` - Readiness check (no auth)
 - `GET /api/v1/metrics` - Prometheus metrics
 
 ### 2. Redis Streams Queue
@@ -126,9 +129,9 @@ SigmaPilot Lens follows an event-driven architecture with clear separation of co
 
 **Responsibility**: Real-time decision delivery
 
-- Plain WebSocket server
+- Plain WebSocket server (scope: `lens:read`)
+- Authentication via `Sec-WebSocket-Protocol: bearer,<token>`
 - Subscription filters: model, symbol, event_type
-- Network-level security (Docker network isolation)
 - Broadcast to matching subscribers
 
 ### 6. PostgreSQL Storage
@@ -141,6 +144,7 @@ SigmaPilot Lens follows an event-driven architecture with clear separation of co
 - `model_decisions` - Per-model decisions
 - `dlq_entries` - Failed processing records
 - `processing_timeline` - Status transitions
+- `llm_configs` - Runtime LLM configuration (API keys, model IDs, enabled status)
 
 ## Data Flow
 
@@ -208,11 +212,66 @@ services:
 
 ## Security Model
 
+### Authentication
+
+SigmaPilot Lens implements a flexible 3-mode authentication system designed for gradual migration from development to production:
+
+| Mode | Use Case | Description |
+|------|----------|-------------|
+| `none` | Development | No authentication required |
+| `psk` | Docker Compose | Pre-shared key tokens |
+| `jwt` | Production | JWT validation with external IdP |
+
+### Authorization Scopes
+
+Role-based access control with 3 scopes:
+
+| Scope | Permissions | Endpoints |
+|-------|-------------|-----------|
+| `lens:submit` | Submit signals | `POST /signals` |
+| `lens:read` | Read data | `GET /events/*`, `/decisions/*`, `/dlq/*`, `WS /ws/stream` |
+| `lens:admin` | Admin + all above | `POST /dlq/*/retry`, `/dlq/*/resolve`, `/llm-configs/*` |
+
+**Scope Hierarchy**: `lens:admin` includes all other scopes.
+
+### PSK Mode (Docker Compose)
+
+```bash
+AUTH_MODE=psk
+AUTH_TOKEN_SUBMIT=<token>  # Grants lens:submit
+AUTH_TOKEN_READ=<token>    # Grants lens:read
+AUTH_TOKEN_ADMIN=<token>   # Grants lens:admin (all scopes)
+```
+
+Usage: `Authorization: Bearer <token>`
+
+### JWT Mode (Production)
+
+- Validates signature against JWKS endpoint or public key
+- Checks `exp`, `iat` claims
+- Reads scopes from configurable claim (default: `scope`)
+- Supports RS256, ES256, HS256 algorithms
+
+```bash
+AUTH_MODE=jwt
+AUTH_JWT_JWKS_URL=https://idp.example.com/.well-known/jwks.json
+AUTH_JWT_ISSUER=https://idp.example.com
+AUTH_JWT_AUDIENCE=lens-api
+AUTH_JWT_SCOPE_CLAIM=scope
+```
+
+### WebSocket Authentication
+
+WebSocket connections authenticate via subprotocol header:
+
+```
+Sec-WebSocket-Protocol: bearer,<token>
+```
+
 ### Network-Level Security
 - All services run inside isolated Docker network (`lens-network`)
 - No ports exposed to host machine in production
-- External requests rejected at application level
-- No API keys required - network isolation provides security
+- Health endpoints (`/health`, `/ready`) bypass authentication
 
 ### Rate Limiting
 - Per-client rate limiting

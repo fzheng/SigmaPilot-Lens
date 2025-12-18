@@ -45,6 +45,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.auth import AuthContext, require_admin, require_read
 from src.models.database import get_db_session
 from src.models.orm.dlq import DLQEntry
 from src.observability.logging import get_logger
@@ -174,6 +175,7 @@ async def list_dlq_entries(
     limit: int = Query(50, ge=1, le=100, description="Max results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     db: AsyncSession = Depends(get_db_session),
+    _auth: AuthContext = Depends(require_read),
 ):
     """
     Query DLQ entries.
@@ -246,6 +248,7 @@ async def list_dlq_entries(
 async def get_dlq_entry(
     dlq_id: str,
     db: AsyncSession = Depends(get_db_session),
+    _auth: AuthContext = Depends(require_read),
 ):
     """
     Get full details of a DLQ entry.
@@ -290,6 +293,7 @@ async def get_dlq_entry(
 async def retry_dlq_entry(
     dlq_id: str,
     db: AsyncSession = Depends(get_db_session),
+    _auth: AuthContext = Depends(require_admin),
 ):
     """
     Retry processing a DLQ entry.
@@ -468,6 +472,7 @@ async def resolve_dlq_entry(
     dlq_id: str,
     request: DLQResolveRequest,
     db: AsyncSession = Depends(get_db_session),
+    _auth: AuthContext = Depends(require_admin),
 ):
     """
     Mark a DLQ entry as resolved.

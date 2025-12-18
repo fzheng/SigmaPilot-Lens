@@ -38,17 +38,23 @@ cp .env.example .env
 
 ### 2. Edit Configuration
 
-Open `.env` and configure AI model API keys:
+Open `.env` and configure authentication:
 
 ```bash
-# Add AI model API keys (for Phase 2+)
-MODEL_CHATGPT_API_KEY=sk-...
-MODEL_GEMINI_API_KEY=...
-MODEL_CLAUDE_API_KEY=sk-ant-...
-MODEL_DEEPSEEK_API_KEY=...
+# Authentication mode: none (dev), psk (Docker Compose), jwt (production)
+AUTH_MODE=psk
+
+# Generate secure tokens (one per scope)
+# python -c "import secrets; print(secrets.token_urlsafe(32))"
+AUTH_TOKEN_SUBMIT=<your-submit-token>
+AUTH_TOKEN_READ=<your-read-token>
+AUTH_TOKEN_ADMIN=<your-admin-token>
 ```
 
-**Note**: No API key authentication is required. SigmaPilot Lens uses network-level security - the API is only accessible from within the Docker network.
+**Scopes**:
+- `AUTH_TOKEN_SUBMIT` - Submit signals (`POST /signals`)
+- `AUTH_TOKEN_READ` - Read events, decisions, DLQ
+- `AUTH_TOKEN_ADMIN` - Admin operations (includes all scopes)
 
 ### 3. Start Services
 
@@ -155,16 +161,17 @@ alembic current
 
 ## Testing the API
 
-### Access from Within Docker Network
+### Authenticated API Requests
 
-The API is only accessible from within the Docker network. Use `docker-compose exec` to interact with the API:
+All API requests (except `/health` and `/ready`) require authentication via Bearer token:
 
 ```bash
-# Health check
-docker-compose exec gateway curl http://localhost:8000/api/v1/health
+# Health check (no auth required)
+curl http://localhost:8000/api/v1/health
 
-# Submit a test signal
-docker-compose exec gateway curl -X POST http://localhost:8000/api/v1/signals \
+# Submit a signal (requires submit token)
+curl -X POST http://localhost:8000/api/v1/signals \
+  -H "Authorization: Bearer <your-submit-token>" \
   -H "Content-Type: application/json" \
   -d '{
     "event_type": "OPEN_SIGNAL",
@@ -176,6 +183,16 @@ docker-compose exec gateway curl -X POST http://localhost:8000/api/v1/signals \
     "ts_utc": "2025-01-15T10:30:00Z",
     "source": "test-signal"
   }'
+
+# Read events (requires read token)
+curl http://localhost:8000/api/v1/events \
+  -H "Authorization: Bearer <your-read-token>"
+
+# Configure LLM models (requires admin token)
+curl -X PUT http://localhost:8000/api/v1/llm-configs/chatgpt \
+  -H "Authorization: Bearer <your-admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"api_key": "sk-...", "enabled": true}'
 ```
 
 Response:
@@ -201,9 +218,9 @@ curl http://localhost:8000/api/v1/metrics
 
 ## WebSocket Testing
 
-WebSocket connections are also restricted to the Docker network.
+WebSocket connections require authentication via the `Sec-WebSocket-Protocol` header.
 
-### From a Container Connected to lens-network
+### Authenticated WebSocket Connection
 
 ```python
 import asyncio
@@ -211,9 +228,12 @@ import websockets
 import json
 
 async def subscribe():
-    # Connect to gateway from within Docker network
-    uri = "ws://gateway:8000/api/v1/ws/stream"
-    async with websockets.connect(uri) as ws:
+    uri = "ws://localhost:8000/api/v1/ws/stream"
+    # Authenticate via subprotocol header
+    async with websockets.connect(
+        uri,
+        subprotocols=["bearer", "<your-read-token>"]
+    ) as ws:
         # Subscribe
         await ws.send(json.dumps({
             "action": "subscribe",
@@ -227,6 +247,22 @@ async def subscribe():
             print(f"Received: {decision}")
 
 asyncio.run(subscribe())
+```
+
+### JavaScript Example
+
+```javascript
+const ws = new WebSocket(
+  'ws://localhost:8000/api/v1/ws/stream',
+  ['bearer', '<your-read-token>']
+);
+
+ws.onopen = () => {
+  console.log('Connected with protocol:', ws.protocol);
+  ws.send(JSON.stringify({ action: 'subscribe', filters: {} }));
+};
+
+ws.onmessage = (event) => console.log('Decision:', JSON.parse(event.data));
 ```
 
 ### WebSocket Messages

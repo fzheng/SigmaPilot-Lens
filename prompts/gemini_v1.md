@@ -43,6 +43,7 @@ Respond with a valid JSON object containing:
     "atr_multiple": number (optional),
     "trail_pct": number (optional)
   },
+
   "size_pct": 0 to 100,
   "reasons": ["tag1", "tag2", ...]
 }

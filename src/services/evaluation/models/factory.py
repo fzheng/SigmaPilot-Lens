@@ -6,16 +6,17 @@ This module provides:
     3. Fallback decision generation for error cases
 
 Usage:
-    # Create adapter from environment config
-    adapter = create_adapter("chatgpt")
+    # Create adapter from LLMConfigData (from database)
+    from src.services.llm_config import LLMConfigData
+    config_data = LLMConfigData(...)
+    adapter = create_adapter("chatgpt", config_data)
 
     # Validate model output
     is_valid, errors = validate_decision_output(response.parsed_response)
 """
 
-from typing import Dict, List, Optional, Tuple, Type, Any
+from typing import Dict, List, Optional, Tuple, Type, Any, TYPE_CHECKING
 
-from src.core.config import ModelConfig as EnvModelConfig
 from src.observability.logging import get_logger
 from src.services.evaluation.models.base import (
     BaseModelAdapter,
@@ -23,6 +24,9 @@ from src.services.evaluation.models.base import (
     ModelResponse,
     ModelStatus,
 )
+
+if TYPE_CHECKING:
+    from src.services.llm_config import LLMConfigData
 
 logger = get_logger(__name__)
 
@@ -71,39 +75,38 @@ def get_adapter_class(provider: str) -> Type[BaseModelAdapter]:
     return adapters[provider_lower]
 
 
-def create_adapter(model_name: str) -> BaseModelAdapter:
-    """Create a model adapter from environment configuration.
-
-    Loads configuration from environment variables using the pattern:
-    MODEL_{MODEL_NAME}_PROVIDER, MODEL_{MODEL_NAME}_API_KEY, etc.
+def create_adapter(
+    model_name: str,
+    config_data: Optional["LLMConfigData"] = None,
+) -> BaseModelAdapter:
+    """Create a model adapter from configuration.
 
     Args:
         model_name: Name of the model (e.g., 'chatgpt', 'gemini', 'claude')
+        config_data: LLMConfigData from database. Required for configured adapters.
 
     Returns:
         Configured model adapter instance
 
     Raises:
-        ValueError: If model configuration is invalid
+        ValueError: If config_data is not provided
     """
-    # Load config from environment
-    env_config = EnvModelConfig.for_model(model_name)
+    if not config_data:
+        raise ValueError(
+            f"No configuration provided for model '{model_name}'. "
+            f"Configure it via /api/v1/llm-configs/{model_name}"
+        )
 
-    if not env_config.provider:
-        raise ValueError(f"MODEL_{model_name.upper()}_PROVIDER not configured")
-
-    # Create internal config
+    # Use provided config data (from database)
     config = ModelConfig(
         model_name=model_name,
-        provider=env_config.provider,
-        api_key=env_config.api_key,
-        model_id=env_config.model_id,
-        timeout_ms=env_config.timeout_ms,
-        max_tokens=env_config.max_tokens,
+        provider=config_data.provider,
+        api_key=config_data.api_key,
+        model_id=config_data.model_id,
+        timeout_ms=config_data.timeout_ms,
+        max_tokens=config_data.max_tokens,
     )
-
-    # Get adapter class and instantiate
-    adapter_class = get_adapter_class(env_config.provider)
+    adapter_class = get_adapter_class(config_data.provider)
     return adapter_class(config)
 
 
