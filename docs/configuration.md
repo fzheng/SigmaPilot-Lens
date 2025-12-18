@@ -39,16 +39,121 @@ DATABASE_URL=postgresql://lens:password@localhost:5432/lens
 REDIS_URL=redis://:password@localhost:6379/0
 ```
 
-### Security
+### Authentication
 
-SigmaPilot Lens uses **network-level security** instead of API keys:
+SigmaPilot Lens supports 3 authentication modes, allowing gradual migration from development to production:
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `AUTH_MODE` | Authentication mode: `none`, `psk`, or `jwt` | `none` | No |
+
+**Authentication Modes**:
+
+1. **`none`** (Development): No authentication required. All requests are allowed with full admin access.
+2. **`psk`** (Docker Compose): Pre-shared key tokens. Simple setup for internal deployments.
+3. **`jwt`** (Portable): JWT validation. Enterprise-ready, integrates with external identity providers.
+
+#### Scopes
+
+| Scope | Description | Endpoints |
+|-------|-------------|-----------|
+| `lens:submit` | Submit signals | `POST /signals` |
+| `lens:read` | Read events, decisions, DLQ | `GET /events/*`, `GET /decisions/*`, `GET /dlq/*`, `WS /ws/stream` |
+| `lens:admin` | Administrative operations (includes all scopes) | `POST /dlq/*/retry`, `POST /dlq/*/resolve`, `/llm-configs/*` |
+
+#### PSK Mode Configuration
+
+Pre-shared key mode uses fixed tokens configured via environment variables:
+
+| Variable | Description | Granted Scope |
+|----------|-------------|---------------|
+| `AUTH_TOKEN_SUBMIT` | Token for signal submission | `lens:submit` |
+| `AUTH_TOKEN_READ` | Token for read operations | `lens:read` |
+| `AUTH_TOKEN_ADMIN` | Token for admin operations | `lens:admin` (all scopes) |
+
+**Example**:
+```bash
+AUTH_MODE=psk
+AUTH_TOKEN_SUBMIT=submit-secret-token-abc123
+AUTH_TOKEN_READ=read-secret-token-def456
+AUTH_TOKEN_ADMIN=admin-secret-token-ghi789
+```
+
+**Usage**:
+```bash
+# Submit a signal with submit token
+curl -X POST http://gateway:8000/api/v1/signals \
+  -H "Authorization: Bearer submit-secret-token-abc123" \
+  -H "Content-Type: application/json" \
+  -d '{"symbol": "BTC-PERP", ...}'
+
+# Read events with read token
+curl http://gateway:8000/api/v1/events \
+  -H "Authorization: Bearer read-secret-token-def456"
+
+# Admin operations with admin token
+curl http://gateway:8000/api/v1/llm-configs \
+  -H "Authorization: Bearer admin-secret-token-ghi789"
+```
+
+#### JWT Mode Configuration
+
+JWT mode validates tokens against external identity providers:
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `AUTH_JWT_PUBLIC_KEY` | PEM-encoded public key for validation | - | Conditional* |
+| `AUTH_JWT_JWKS_URL` | URL to JWKS endpoint | - | Conditional* |
+| `AUTH_JWT_ISSUER` | Expected `iss` claim | - | No |
+| `AUTH_JWT_AUDIENCE` | Expected `aud` claim | - | No |
+| `AUTH_JWT_SCOPE_CLAIM` | Claim containing scopes | `scope` | No |
+
+*Either `AUTH_JWT_PUBLIC_KEY` or `AUTH_JWT_JWKS_URL` is required in JWT mode.
+
+**Example**:
+```bash
+AUTH_MODE=jwt
+AUTH_JWT_JWKS_URL=https://your-idp.com/.well-known/jwks.json
+AUTH_JWT_ISSUER=https://your-idp.com
+AUTH_JWT_AUDIENCE=lens-api
+AUTH_JWT_SCOPE_CLAIM=scope
+```
+
+**JWT Requirements**:
+- Algorithm: RS256, ES256, or HS256
+- Required claims: `exp`, `iat`
+- Scopes must be space-separated in the scope claim: `"scope": "lens:submit lens:read"`
+
+#### WebSocket Authentication
+
+WebSocket connections authenticate via the `Sec-WebSocket-Protocol` header:
+
+```
+Sec-WebSocket-Protocol: bearer,<token>
+```
+
+The server echoes back `bearer` in the response protocol if authentication succeeds.
+
+**Example (JavaScript)**:
+```javascript
+const ws = new WebSocket('ws://gateway:8000/api/v1/ws/stream', ['bearer', 'your-token-here']);
+
+ws.onopen = () => {
+  // Protocol will be 'bearer' if auth succeeded
+  console.log('Connected with protocol:', ws.protocol);
+};
+```
+
+### Network Security
+
+In addition to authentication, SigmaPilot Lens uses network-level security:
 
 - All services are isolated within the Docker network (`lens-network`)
-- No ports are exposed to the host machine
+- No ports are exposed to the host machine by default
 - External requests are rejected at the application level
-- No API keys required
+- Health check endpoints (`/health`, `/ready`) are always accessible
 
-This is configured automatically in `docker-compose.yml` - no additional configuration needed.
+This is configured automatically in `docker-compose.yml`.
 
 ### Rate Limiting
 
@@ -110,65 +215,53 @@ This is configured automatically in `docker-compose.yml` - no additional configu
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
-| `AI_MODELS` | Comma-separated model names | `chatgpt,gemini` | No |
-| `USE_REAL_AI` | Enable real AI evaluation | `false` | **Yes for production** |
+| `USE_REAL_AI` | Enable real AI evaluation | - | **Yes** |
 
-> **⚠️ IMPORTANT**: `USE_REAL_AI` defaults to `false` for safety. When `false`, the system returns deterministic stub decisions instead of calling AI APIs. **You must set `USE_REAL_AI=true` in production** to use real AI models.
+> **⚠️ IMPORTANT**: `USE_REAL_AI` must be explicitly set. When `false`, the system returns deterministic stub decisions instead of calling AI APIs. **Set `USE_REAL_AI=true` in production** to use real AI models.
 
 **Evaluation Modes**:
-- `USE_REAL_AI=false` (default): Stub mode - returns deterministic decisions for testing/development
+- `USE_REAL_AI=false`: Stub mode - returns deterministic decisions for testing/development
 - `USE_REAL_AI=true`: Real mode - calls configured AI models in parallel
 
-#### Per-Model Configuration
+#### LLM Configuration Management
 
-For each model in `AI_MODELS`, configure:
+LLM configurations (API keys, model IDs, enabled status) are managed at **runtime via API endpoints**, not environment variables. This allows:
 
-| Variable Pattern | Description | Default | Required |
-|-----------------|-------------|---------|----------|
-| `MODEL_{NAME}_PROVIDER` | API provider | - | **Yes** |
-| `MODEL_{NAME}_API_KEY` | API key | - | **Yes** |
-| `MODEL_{NAME}_MODEL_ID` | Specific model ID | varies | No |
-| `MODEL_{NAME}_TIMEOUT_MS` | Request timeout | `30000` | No |
-| `MODEL_{NAME}_MAX_TOKENS` | Max response tokens | `1000` | No |
-| `MODEL_{NAME}_PROMPT_PATH` | Path to prompt file | `prompts/{name}_v1.md` | No |
+- **Hot reload**: Change API keys without container restart
+- **Dynamic enable/disable**: Turn models on/off without redeployment
+- **API key testing**: Validate keys before enabling
+- **Secure storage**: Keys stored in PostgreSQL, masked in API responses
 
-**Example (ChatGPT)**:
-```
-MODEL_CHATGPT_PROVIDER=openai
-MODEL_CHATGPT_API_KEY=sk-your-openai-key
-MODEL_CHATGPT_MODEL_ID=gpt-4o
-MODEL_CHATGPT_TIMEOUT_MS=30000
-MODEL_CHATGPT_MAX_TOKENS=1000
-MODEL_CHATGPT_PROMPT_PATH=/app/prompts/chatgpt_v1.md
-```
+**Supported Models**:
 
-**Example (Gemini)**:
-```
-MODEL_GEMINI_PROVIDER=google
-MODEL_GEMINI_API_KEY=your-google-ai-key
-MODEL_GEMINI_MODEL_ID=gemini-1.5-pro
-MODEL_GEMINI_TIMEOUT_MS=30000
-MODEL_GEMINI_MAX_TOKENS=1000
-MODEL_GEMINI_PROMPT_PATH=/app/prompts/gemini_v1.md
-```
+| Model Name | Provider | Default Model ID |
+|------------|----------|------------------|
+| `chatgpt` | OpenAI | `gpt-4o` |
+| `gemini` | Google | `gemini-1.5-pro` |
+| `claude` | Anthropic | `claude-sonnet-4-20250514` |
+| `deepseek` | DeepSeek | `deepseek-chat` |
 
-**Example (Claude)**:
-```
-MODEL_CLAUDE_PROVIDER=anthropic
-MODEL_CLAUDE_API_KEY=sk-ant-your-anthropic-key
-MODEL_CLAUDE_MODEL_ID=claude-sonnet-4-20250514
-MODEL_CLAUDE_TIMEOUT_MS=30000
-MODEL_CLAUDE_MAX_TOKENS=1000
+**Configuration via API**:
+
+```bash
+# Configure ChatGPT
+curl -X PUT http://gateway:8000/api/v1/llm-configs/chatgpt \
+  -H "Content-Type: application/json" \
+  -d '{"api_key": "sk-...", "enabled": true}'
+
+# Test the API key
+curl -X POST http://gateway:8000/api/v1/llm-configs/chatgpt/test
+
+# List all configurations
+curl http://gateway:8000/api/v1/llm-configs
+
+# Disable a model
+curl -X PATCH http://gateway:8000/api/v1/llm-configs/chatgpt \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": false}'
 ```
 
-**Example (DeepSeek)**:
-```
-MODEL_DEEPSEEK_PROVIDER=deepseek
-MODEL_DEEPSEEK_API_KEY=your-deepseek-key
-MODEL_DEEPSEEK_MODEL_ID=deepseek-chat
-MODEL_DEEPSEEK_TIMEOUT_MS=30000
-MODEL_DEEPSEEK_MAX_TOKENS=1000
-```
+See [API Reference](api-reference.md#llm-configuration) for full endpoint documentation
 
 ### WebSocket
 
@@ -306,10 +399,20 @@ RETENTION_DAYS=180
 REDIS_URL=redis://localhost:6379/0
 
 # ===================
-# Security
+# Authentication
 # ===================
-# Network-based security: API is only accessible from internal Docker network
-# No API keys required - all external requests are rejected at network level
+# AUTH_MODE: none (dev), psk (Docker Compose), jwt (portable)
+AUTH_MODE=none
+
+# PSK Mode tokens (uncomment and set for psk mode)
+# AUTH_TOKEN_SUBMIT=your-submit-token
+# AUTH_TOKEN_READ=your-read-token
+# AUTH_TOKEN_ADMIN=your-admin-token
+
+# JWT Mode (uncomment for jwt mode)
+# AUTH_JWT_JWKS_URL=https://your-idp.com/.well-known/jwks.json
+# AUTH_JWT_ISSUER=https://your-idp.com
+# AUTH_JWT_AUDIENCE=lens-api
 
 # ===================
 # Rate Limiting
@@ -340,35 +443,9 @@ STALE_CTX_S=60
 # ===================
 # AI Models
 # ===================
-AI_MODELS=chatgpt,gemini,claude,deepseek
-
-# ChatGPT Configuration
-MODEL_CHATGPT_PROVIDER=openai
-MODEL_CHATGPT_API_KEY=sk-your-openai-api-key
-MODEL_CHATGPT_MODEL_ID=gpt-4o
-MODEL_CHATGPT_TIMEOUT_MS=30000
-MODEL_CHATGPT_MAX_TOKENS=1000
-
-# Gemini Configuration
-MODEL_GEMINI_PROVIDER=google
-MODEL_GEMINI_API_KEY=your-google-ai-api-key
-MODEL_GEMINI_MODEL_ID=gemini-1.5-pro
-MODEL_GEMINI_TIMEOUT_MS=30000
-MODEL_GEMINI_MAX_TOKENS=1000
-
-# Claude Configuration
-MODEL_CLAUDE_PROVIDER=anthropic
-MODEL_CLAUDE_API_KEY=sk-ant-your-anthropic-api-key
-MODEL_CLAUDE_MODEL_ID=claude-sonnet-4-20250514
-MODEL_CLAUDE_TIMEOUT_MS=30000
-MODEL_CLAUDE_MAX_TOKENS=1000
-
-# DeepSeek Configuration
-MODEL_DEEPSEEK_PROVIDER=deepseek
-MODEL_DEEPSEEK_API_KEY=your-deepseek-api-key
-MODEL_DEEPSEEK_MODEL_ID=deepseek-chat
-MODEL_DEEPSEEK_TIMEOUT_MS=30000
-MODEL_DEEPSEEK_MAX_TOKENS=1000
+# Set to true for production, false for stub decisions
+USE_REAL_AI=false
+# LLM API keys are configured via API: /api/v1/llm-configs
 
 # ===================
 # WebSocket
@@ -427,8 +504,10 @@ On startup, the application validates:
 1. All required environment variables are set
 2. Database connection is valid
 3. Redis connection is valid
-4. AI model API keys are present for configured models
+4. `USE_REAL_AI` is explicitly set (true or false)
 5. Feature profile exists
 6. Policy configuration is valid YAML
+
+LLM configurations are loaded from the database on startup. If no models are configured, the system will log a warning but continue running. Configure models via the `/api/v1/llm-configs` endpoints.
 
 Validation errors will prevent startup and log detailed error messages.

@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from src.core.auth import AuthContext, require_read
 from src.models.database import get_db_session
 from src.models.orm.event import Event, EnrichedEvent, ProcessingTimeline
 from src.models.orm.decision import ModelDecision
@@ -40,6 +41,7 @@ async def list_events(
     limit: int = Query(50, ge=1, le=100, description="Max results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     db: AsyncSession = Depends(get_db_session),
+    _auth: AuthContext = Depends(require_read),
 ):
     """
     List events with optional filters.
@@ -107,6 +109,7 @@ async def list_events(
 async def get_event(
     event_id: str,
     db: AsyncSession = Depends(get_db_session),
+    _auth: AuthContext = Depends(require_read),
 ):
     """
     Get full details of an event.
@@ -186,6 +189,7 @@ async def get_event(
 async def get_event_status(
     event_id: str,
     db: AsyncSession = Depends(get_db_session),
+    _auth: AuthContext = Depends(require_read),
 ):
     """
     Get the current processing status of an event.
