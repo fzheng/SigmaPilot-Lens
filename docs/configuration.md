@@ -59,7 +59,7 @@ SigmaPilot Lens supports 3 authentication modes, allowing gradual migration from
 |-------|-------------|-----------|
 | `lens:submit` | Submit signals | `POST /signals` |
 | `lens:read` | Read events, decisions, DLQ | `GET /events/*`, `GET /decisions/*`, `GET /dlq/*`, `WS /ws/stream` |
-| `lens:admin` | Administrative operations (includes all scopes) | `POST /dlq/*/retry`, `POST /dlq/*/resolve`, `/llm-configs/*` |
+| `lens:admin` | Administrative operations (includes all scopes) | `POST /dlq/*/retry`, `POST /dlq/*/resolve`, `/llm-configs/*`, `/prompts/*` |
 
 #### PSK Mode Configuration
 
@@ -261,7 +261,49 @@ curl -X PATCH http://gateway:8000/api/v1/llm-configs/chatgpt \
   -d '{"enabled": false}'
 ```
 
-See [API Reference](api-reference.md#llm-configuration) for full endpoint documentation
+See [API Reference](api-reference.md#llm-configuration) for full endpoint documentation.
+
+#### Prompt Management
+
+AI prompts are stored in the database and managed via API endpoints. This enables:
+
+- **Versioning**: Multiple prompt versions can coexist (v1, v2, etc.)
+- **Hot reload**: Update prompts without container restart
+- **Audit trail**: Track who created/modified prompts and when
+- **Core + Wrapper pattern**: Shared core logic with model-specific wrappers
+
+**Prompt Types**:
+- `core`: Shared decision-making logic (e.g., `core_decision`)
+- `wrapper`: Model-specific formatting (e.g., `chatgpt_wrapper`, `claude_wrapper`)
+
+**Configuration via API**:
+
+```bash
+# List all prompts
+curl http://gateway:8000/api/v1/prompts \
+  -H "Authorization: Bearer <admin-token>"
+
+# Create a new prompt version
+curl -X POST http://gateway:8000/api/v1/prompts \
+  -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "core_decision",
+    "version": "v2",
+    "prompt_type": "core",
+    "content": "# Trading Decision Framework v2..."
+  }'
+
+# Deactivate a prompt version
+curl -X PATCH http://gateway:8000/api/v1/prompts/core_decision/v1 \
+  -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"is_active": false}'
+```
+
+On first startup, if no prompts exist in the database, the service automatically seeds from the `prompts/` directory.
+
+See [API Reference](api-reference.md#prompt-management) for full endpoint documentation.
 
 ### WebSocket
 

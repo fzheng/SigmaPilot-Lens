@@ -4,6 +4,7 @@ from src.models.orm.event import Event, EnrichedEvent, ProcessingTimeline
 from src.models.orm.decision import ModelDecision
 from src.models.orm.dlq import DLQEntry
 from src.models.orm.llm_config import LLMConfig
+from src.models.orm.prompt import Prompt
 
 __all__ = [
     "Event",
@@ -12,4 +13,5 @@ __all__ = [
     "ModelDecision",
     "DLQEntry",
     "LLMConfig",
+    "Prompt",
 ]

@@ -60,6 +60,9 @@ SigmaPilot Lens follows an event-driven architecture with clear separation of co
 - `POST /api/v1/dlq/{id}/resolve` - Mark entry as resolved (scope: `lens:admin`)
 - `GET /api/v1/llm-configs` - List LLM configurations (scope: `lens:admin`)
 - `PUT /api/v1/llm-configs/{model}` - Configure LLM model (scope: `lens:admin`)
+- `GET /api/v1/prompts` - List AI prompts (scope: `lens:admin`)
+- `POST /api/v1/prompts` - Create AI prompt (scope: `lens:admin`)
+- `PUT /api/v1/prompts/{name}/{version}` - Update AI prompt (scope: `lens:admin`)
 - `GET /api/v1/health` - Health check (no auth)
 - `GET /api/v1/ready` - Readiness check (no auth)
 - `GET /api/v1/metrics` - Prometheus metrics
@@ -111,6 +114,7 @@ SigmaPilot Lens follows an event-driven architecture with clear separation of co
 - Strict output schema validation
 - Token economy controls per model
 - Fallback decisions for failed evaluations (IGNORE with 0 confidence)
+- **Database-backed prompts**: Prompts loaded from PostgreSQL with in-memory caching (5-min TTL)
 - Prompt versioning and hash tracking for reproducibility
 
 **Supported Models**:
@@ -145,6 +149,7 @@ SigmaPilot Lens follows an event-driven architecture with clear separation of co
 - `dlq_entries` - Failed processing records
 - `processing_timeline` - Status transitions
 - `llm_configs` - Runtime LLM configuration (API keys, model IDs, enabled status)
+- `prompts` - Versioned AI prompts (core + wrapper pattern)
 
 ## Data Flow
 
@@ -177,10 +182,11 @@ SigmaPilot Lens follows an event-driven architecture with clear separation of co
 
 4. AI Evaluation
    └─▶ Consume from lens:signals:enriched
-   └─▶ Load prompts for configured models
+   └─▶ Load prompts from database cache (core + wrapper)
+   └─▶ Render prompts with enriched data
    └─▶ Call models in parallel
    └─▶ Validate output schemas
-   └─▶ Persist decisions
+   └─▶ Persist decisions with prompt version/hash
    └─▶ Trigger publish
 
 5. Publishing
@@ -230,7 +236,7 @@ Role-based access control with 3 scopes:
 |-------|-------------|-----------|
 | `lens:submit` | Submit signals | `POST /signals` |
 | `lens:read` | Read data | `GET /events/*`, `/decisions/*`, `/dlq/*`, `WS /ws/stream` |
-| `lens:admin` | Admin + all above | `POST /dlq/*/retry`, `/dlq/*/resolve`, `/llm-configs/*` |
+| `lens:admin` | Admin + all above | `POST /dlq/*/retry`, `/dlq/*/resolve`, `/llm-configs/*`, `/prompts/*` |
 
 **Scope Hierarchy**: `lens:admin` includes all other scopes.
 

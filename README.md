@@ -18,6 +18,7 @@ SigmaPilot Lens analyzes trading signals in real-time using multiple AI models a
 - **Multi-Model AI Consensus** — Get perspectives from 4 different AI providers simultaneously
 - **Real-Time Enrichment** — Live market data from Hyperliquid with TA indicators
 - **Signal Validation** — Automatic rejection of stale or price-drifted signals
+- **Runtime Configuration** — Manage LLM API keys and AI prompts via API without restarts
 - **Production Ready** — Load tested, observable, with comprehensive failure handling
 
 ## Quick Start
@@ -56,7 +57,7 @@ SigmaPilot Lens supports 3 authentication modes:
 |-------|--------|
 | `lens:submit` | Submit signals |
 | `lens:read` | Read events, decisions, DLQ |
-| `lens:admin` | Admin operations + all above |
+| `lens:admin` | Admin operations (LLM configs, prompts, DLQ retry) + all above |
 
 ### PSK Mode Example
 

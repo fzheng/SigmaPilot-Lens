@@ -41,8 +41,8 @@ from src.services.evaluation.models import (
     normalize_decision_output,
     validate_decision_output,
 )
-from src.services.evaluation.prompt_loader import get_prompt_for_model
 from src.services.llm_config import get_llm_config_service
+from src.services.prompt import get_prompt_service
 from src.services.publisher.publisher import publisher
 from src.services.queue import QueueConsumer, RedisClient
 
@@ -279,9 +279,10 @@ class EvaluationWorker(QueueConsumer):
                 logger.warning(f"No adapter available for {model_name}, skipping")
                 return None
 
-            # Render prompt
+            # Render prompt using database-backed prompt service
             constraints = payload.get("constraints", {})
-            prompt, prompt_version, prompt_hash = get_prompt_for_model(
+            prompt_service = get_prompt_service()
+            prompt, prompt_version, prompt_hash = await prompt_service.render_prompt(
                 model_name=model_name,
                 enriched_event=payload,
                 constraints=constraints,

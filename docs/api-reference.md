@@ -25,7 +25,7 @@ Authorization: Bearer <token>
 |-------|-------------|--------------|
 | `lens:submit` | Submit trading signals | `POST /signals` |
 | `lens:read` | Read events, decisions, DLQ | `GET /events/*`, `GET /decisions/*`, `GET /dlq/*`, `WS /ws/stream` |
-| `lens:admin` | Administrative operations | `POST /dlq/*/retry`, `POST /dlq/*/resolve`, `/llm-configs/*` |
+| `lens:admin` | Administrative operations | `POST /dlq/*/retry`, `POST /dlq/*/resolve`, `/llm-configs/*`, `/prompts/*` |
 
 > **Note**: The `lens:admin` scope includes all other scopes.
 
@@ -686,6 +686,228 @@ POST /llm-configs/{model_name}/disable
 ```
 
 **Scope**: `lens:admin`
+
+---
+
+## Prompt Management
+
+Manage AI prompts at runtime. Prompts use a **core + wrapper** pattern:
+- **Core prompts**: Shared decision logic (e.g., `core_decision`)
+- **Wrapper prompts**: Provider-specific formatting (e.g., `chatgpt_wrapper`, `claude_wrapper`)
+
+> **Note**: All prompt management endpoints require `lens:admin` scope.
+
+### List Prompts
+
+```
+GET /prompts
+```
+
+**Scope**: `lens:admin`
+
+**Query Parameters**:
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `prompt_type` | string | - | Filter by type (`core` or `wrapper`) |
+| `include_inactive` | boolean | `false` | Include inactive prompts |
+
+**Response** `200 OK`:
+```json
+{
+  "items": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "core_decision",
+      "version": "v1",
+      "prompt_type": "core",
+      "model_name": null,
+      "content": "# Trading Signal Decision Framework...",
+      "content_hash": "a1b2c3d4...",
+      "is_active": true,
+      "description": "Core decision prompt for trading signals",
+      "created_at": "2024-01-15T10:00:00Z"
+    }
+  ],
+  "total": 5
+}
+```
+
+### Get Available Prompts
+
+Get a summary of available prompt versions grouped by type.
+
+```
+GET /prompts/available
+```
+
+**Scope**: `lens:admin`
+
+**Response** `200 OK`:
+```json
+{
+  "core_versions": ["v1", "v2"],
+  "wrappers": {
+    "chatgpt": ["v1"],
+    "gemini": ["v1"],
+    "claude": ["v1"],
+    "deepseek": ["v1"]
+  }
+}
+```
+
+### Get Prompt
+
+```
+GET /prompts/{name}/{version}
+```
+
+**Scope**: `lens:admin`
+
+**Path Parameters**:
+| Parameter | Description |
+|-----------|-------------|
+| `name` | Prompt name (e.g., `core_decision`, `chatgpt_wrapper`) |
+| `version` | Version string (e.g., `v1`, `v2`) |
+
+**Response** `200 OK`:
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "core_decision",
+  "version": "v1",
+  "prompt_type": "core",
+  "model_name": null,
+  "content": "# Trading Signal Decision Framework...",
+  "content_hash": "a1b2c3d4...",
+  "is_active": true,
+  "description": "Core decision prompt for trading signals",
+  "created_at": "2024-01-15T10:00:00Z"
+}
+```
+
+### Create Prompt
+
+```
+POST /prompts
+```
+
+**Scope**: `lens:admin`
+
+**Request Body**:
+```json
+{
+  "name": "core_decision",
+  "version": "v2",
+  "prompt_type": "core",
+  "content": "# Trading Signal Decision Framework v2...",
+  "description": "Updated core decision prompt"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | **Yes** | Prompt name |
+| `version` | string | **Yes** | Version string |
+| `prompt_type` | string | **Yes** | `core` or `wrapper` |
+| `content` | string | **Yes** | Prompt content |
+| `model_name` | string | Conditional | Required for wrapper prompts |
+| `description` | string | No | Optional description |
+
+**Response** `201 Created`:
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440001",
+  "name": "core_decision",
+  "version": "v2",
+  "prompt_type": "core",
+  "model_name": null,
+  "content": "# Trading Signal Decision Framework v2...",
+  "content_hash": "e5f6g7h8...",
+  "is_active": true,
+  "description": "Updated core decision prompt",
+  "created_at": "2024-01-15T12:00:00Z"
+}
+```
+
+### Update Prompt
+
+```
+PUT /prompts/{name}/{version}
+```
+
+**Scope**: `lens:admin`
+
+**Request Body**:
+```json
+{
+  "content": "# Updated prompt content...",
+  "description": "Updated description"
+}
+```
+
+### Partial Update Prompt
+
+```
+PATCH /prompts/{name}/{version}
+```
+
+**Scope**: `lens:admin`
+
+Partially update a prompt (e.g., activate/deactivate).
+
+**Request Body**:
+```json
+{
+  "is_active": false
+}
+```
+
+### Delete Prompt
+
+```
+DELETE /prompts/{name}/{version}
+```
+
+**Scope**: `lens:admin`
+
+**Response** `204 No Content`
+
+### Render Prompt
+
+Render a complete prompt with enriched event data and constraints. Useful for testing prompts before deployment.
+
+```
+POST /prompts/render
+```
+
+**Scope**: `lens:admin`
+
+**Request Body**:
+```json
+{
+  "model_name": "chatgpt",
+  "enriched_event": {
+    "symbol": "BTC",
+    "signal_direction": "long",
+    "entry_price": 42000.50
+  },
+  "constraints": {
+    "max_position_size_pct": 25,
+    "min_hold_minutes": 15
+  },
+  "core_version": "v1",
+  "wrapper_version": "v1"
+}
+```
+
+**Response** `200 OK`:
+```json
+{
+  "rendered_prompt": "# Trading Signal Decision...\n\n## Event Data\n{...}",
+  "prompt_version": "chatgpt_v1_core_v1",
+  "prompt_hash": "a1b2c3d4e5f6..."
+}
+```
 
 ---
 
