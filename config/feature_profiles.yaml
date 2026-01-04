@@ -1,5 +1,16 @@
 # Feature Profile Configuration
 # Defines what market data and technical indicators to compute for each profile
+#
+# Available indicators:
+#   - ema: Exponential Moving Average (periods: list of integers)
+#   - sma: Simple Moving Average (periods: list of integers)
+#   - macd: Moving Average Convergence Divergence (fast, slow, signal)
+#   - rsi: Relative Strength Index (period)
+#   - atr: Average True Range (period)
+#   - bollinger: Bollinger Bands (period, std_dev) - includes BBW and rating
+#   - adx: Average Directional Index (period) - trend strength
+#   - stochastic: Stochastic Oscillator (k_period, d_period)
+#   - volume: Volume metrics (includes current volume and SMA20)
 
 trend_follow_v1:
   description: "Minimal trend-following indicators"
@@ -11,6 +22,9 @@ trend_follow_v1:
     - name: ema
       params:
         periods: [9, 21, 50]
+    - name: sma
+      params:
+        periods: [20]
     - name: macd
       params:
         fast: 12
@@ -22,6 +36,18 @@ trend_follow_v1:
     - name: atr
       params:
         period: 14
+    - name: bollinger
+      params:
+        period: 20
+        std_dev: 2.0
+    - name: adx
+      params:
+        period: 14
+    - name: stochastic
+      params:
+        k_period: 14
+        d_period: 3
+    - name: volume
   market_data:
     - mid_price
     - spread_bps
