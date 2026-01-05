@@ -2,13 +2,70 @@
 
 Base URL: `http://gateway:8000/api/v1` (from within Docker network)
 
-## Security
+## Authentication
 
-**Network-Level Security**: All endpoints are protected by network isolation. Only requests from within the Docker network (`lens-network`) are accepted.
+SigmaPilot Lens supports 3 authentication modes controlled by `AUTH_MODE`:
 
-- No API keys required
+| Mode | Description | Use Case |
+|------|-------------|----------|
+| `none` | No authentication required | Development |
+| `psk` | Pre-shared key tokens | Docker Compose deployments |
+| `jwt` | JWT validation | Production with external IdP |
+
+### Authorization Header
+
+All protected endpoints accept a Bearer token:
+```
+Authorization: Bearer <token>
+```
+
+### Scopes
+
+| Scope | Description | Required For |
+|-------|-------------|--------------|
+| `lens:submit` | Submit trading signals | `POST /signals` |
+| `lens:read` | Read events, decisions, DLQ | `GET /events/*`, `GET /decisions/*`, `GET /dlq/*`, `WS /ws/stream` |
+| `lens:admin` | Administrative operations | `POST /dlq/*/retry`, `POST /dlq/*/resolve`, `/llm-configs/*`, `/prompts/*` |
+
+> **Note**: The `lens:admin` scope includes all other scopes.
+
+### WebSocket Authentication
+
+WebSocket connections use the `Sec-WebSocket-Protocol` header:
+```
+Sec-WebSocket-Protocol: bearer,<token>
+```
+
+### Error Responses
+
+`401 Unauthorized` - No valid token provided:
+```json
+{
+  "error": {
+    "code": "UNAUTHORIZED",
+    "message": "Authentication required"
+  }
+}
+```
+
+`403 Forbidden` - Insufficient permissions:
+```json
+{
+  "error": {
+    "code": "FORBIDDEN",
+    "message": "Insufficient permissions. Required scope: lens:admin"
+  }
+}
+```
+
+See [Configuration Guide](configuration.md#authentication) for setup details.
+
+## Network Security
+
+In addition to authentication, all endpoints are protected by network isolation. Only requests from within the Docker network (`lens-network`) are accepted.
+
 - External requests are rejected with `403 Forbidden`
-- Health endpoints (`/health`, `/ready`) are accessible for Docker health checks
+- Health endpoints (`/health`, `/ready`) are always accessible
 
 ---
 
@@ -21,6 +78,8 @@ Submit a trading signal for analysis.
 ```
 POST /signals
 ```
+
+**Scope**: `lens:submit`
 
 **Headers**:
 | Header | Required | Description |
@@ -99,6 +158,8 @@ Retrieve a list of submitted events.
 GET /events
 ```
 
+**Scope**: `lens:read`
+
 **Query Parameters**:
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -140,6 +201,8 @@ Retrieve a specific event with full details.
 ```
 GET /events/{event_id}
 ```
+
+**Scope**: `lens:read`
 
 **Response** `200 OK`:
 ```json
@@ -204,6 +267,8 @@ Get the current processing status of an event.
 GET /events/{event_id}/status
 ```
 
+**Scope**: `lens:read`
+
 **Response** `200 OK`:
 ```json
 {
@@ -225,6 +290,8 @@ Query AI model decisions.
 ```
 GET /decisions
 ```
+
+**Scope**: `lens:read`
 
 **Query Parameters**:
 | Parameter | Type | Default | Description |
@@ -271,6 +338,8 @@ Get a specific decision by ID.
 ```
 GET /decisions/{decision_id}
 ```
+
+**Scope**: `lens:read`
 
 **Response** `200 OK`:
 ```json
@@ -370,6 +439,15 @@ From within the Docker network:
 ws://gateway:8000/api/v1/ws/stream
 ```
 
+**Scope**: `lens:read`
+
+**Authentication**: When `AUTH_MODE` is `psk` or `jwt`, authenticate via the `Sec-WebSocket-Protocol` header:
+```
+Sec-WebSocket-Protocol: bearer,<token>
+```
+
+The server echoes back `bearer` in the response protocol if authentication succeeds.
+
 ### Messages
 
 **Subscribe**:
@@ -428,6 +506,411 @@ ws://gateway:8000/api/v1/ws/stream
 
 ---
 
+## LLM Configuration
+
+Manage LLM provider configurations at runtime. Allows updating API keys, enabling/disabling models, and testing connections without container restarts.
+
+> **Note**: All LLM configuration endpoints require `lens:admin` scope.
+
+### List LLM Configurations
+
+```
+GET /llm-configs
+```
+
+**Scope**: `lens:admin`
+
+**Response** `200 OK`:
+```json
+{
+  "items": [
+    {
+      "model_name": "chatgpt",
+      "provider": "openai",
+      "model_id": "gpt-4o",
+      "enabled": true,
+      "timeout_ms": 30000,
+      "max_tokens": 1000,
+      "prompt_path": null,
+      "api_key_masked": "****sk12",
+      "validation_status": "ok",
+      "last_validated_at": "2024-01-15T10:00:00Z"
+    }
+  ],
+  "total": 1
+}
+```
+
+### Get LLM Configuration
+
+```
+GET /llm-configs/{model_name}
+```
+
+**Scope**: `lens:admin`
+
+**Path Parameters**:
+| Parameter | Description |
+|-----------|-------------|
+| `model_name` | Model name (chatgpt, gemini, claude, deepseek) |
+
+**Response** `200 OK`:
+```json
+{
+  "model_name": "chatgpt",
+  "provider": "openai",
+  "model_id": "gpt-4o",
+  "enabled": true,
+  "timeout_ms": 30000,
+  "max_tokens": 1000,
+  "prompt_path": null,
+  "api_key_masked": "****sk12",
+  "validation_status": "ok",
+  "last_validated_at": "2024-01-15T10:00:00Z"
+}
+```
+
+### Create or Update LLM Configuration
+
+```
+PUT /llm-configs/{model_name}
+```
+
+**Scope**: `lens:admin`
+
+**Request Body**:
+```json
+{
+  "api_key": "sk-your-api-key",
+  "model_id": "gpt-4o",
+  "enabled": true,
+  "timeout_ms": 30000,
+  "max_tokens": 1000
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `api_key` | string | **Yes** | API key for the provider |
+| `model_id` | string | No | Model identifier (uses default if not specified) |
+| `enabled` | boolean | No | Whether model is enabled (default: true) |
+| `timeout_ms` | int | No | Request timeout in ms (default: 30000) |
+| `max_tokens` | int | No | Max response tokens (default: 1000) |
+
+**Note**: The `provider` is automatically determined by the model name and cannot be changed.
+
+**Response** `200 OK`:
+```json
+{
+  "model_name": "chatgpt",
+  "provider": "openai",
+  "model_id": "gpt-4o",
+  "enabled": true,
+  "timeout_ms": 30000,
+  "max_tokens": 1000,
+  "prompt_path": null,
+  "api_key_masked": "****sk12"
+}
+```
+
+### Partial Update LLM Configuration
+
+```
+PATCH /llm-configs/{model_name}
+```
+
+**Scope**: `lens:admin`
+
+Update specific fields without providing all values.
+
+**Request Body**:
+```json
+{
+  "enabled": false
+}
+```
+
+### Delete LLM Configuration
+
+```
+DELETE /llm-configs/{model_name}
+```
+
+**Scope**: `lens:admin`
+
+**Response** `200 OK`:
+```json
+{
+  "status": "deleted",
+  "model_name": "chatgpt"
+}
+```
+
+### Test API Key
+
+Test if an API key is valid by making a minimal API call.
+
+```
+POST /llm-configs/{model_name}/test
+```
+
+**Scope**: `lens:admin`
+
+**Response** `200 OK`:
+```json
+{
+  "model_name": "chatgpt",
+  "success": true,
+  "message": "API key is valid",
+  "latency_ms": 1250
+}
+```
+
+**Response** `200 OK` (failed test):
+```json
+{
+  "model_name": "chatgpt",
+  "success": false,
+  "message": "401 Unauthorized: Invalid API key",
+  "latency_ms": 0
+}
+```
+
+### Enable/Disable Model
+
+Quick shortcuts to enable or disable a model.
+
+```
+POST /llm-configs/{model_name}/enable
+POST /llm-configs/{model_name}/disable
+```
+
+**Scope**: `lens:admin`
+
+---
+
+## Prompt Management
+
+Manage AI prompts at runtime. Prompts use a **core + wrapper** pattern:
+- **Core prompts**: Shared decision logic (e.g., `core_decision`)
+- **Wrapper prompts**: Provider-specific formatting (e.g., `chatgpt_wrapper`, `claude_wrapper`)
+
+> **Note**: All prompt management endpoints require `lens:admin` scope.
+
+### List Prompts
+
+```
+GET /prompts
+```
+
+**Scope**: `lens:admin`
+
+**Query Parameters**:
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `prompt_type` | string | - | Filter by type (`core` or `wrapper`) |
+| `include_inactive` | boolean | `false` | Include inactive prompts |
+
+**Response** `200 OK`:
+```json
+{
+  "items": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "core_decision",
+      "version": "v1",
+      "prompt_type": "core",
+      "model_name": null,
+      "content": "# Trading Signal Decision Framework...",
+      "content_hash": "a1b2c3d4...",
+      "is_active": true,
+      "description": "Core decision prompt for trading signals",
+      "created_at": "2024-01-15T10:00:00Z"
+    }
+  ],
+  "total": 5
+}
+```
+
+### Get Available Prompts
+
+Get a summary of available prompt versions grouped by type.
+
+```
+GET /prompts/available
+```
+
+**Scope**: `lens:admin`
+
+**Response** `200 OK`:
+```json
+{
+  "core_versions": ["v1", "v2"],
+  "wrappers": {
+    "chatgpt": ["v1"],
+    "gemini": ["v1"],
+    "claude": ["v1"],
+    "deepseek": ["v1"]
+  }
+}
+```
+
+### Get Prompt
+
+```
+GET /prompts/{name}/{version}
+```
+
+**Scope**: `lens:admin`
+
+**Path Parameters**:
+| Parameter | Description |
+|-----------|-------------|
+| `name` | Prompt name (e.g., `core_decision`, `chatgpt_wrapper`) |
+| `version` | Version string (e.g., `v1`, `v2`) |
+
+**Response** `200 OK`:
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "core_decision",
+  "version": "v1",
+  "prompt_type": "core",
+  "model_name": null,
+  "content": "# Trading Signal Decision Framework...",
+  "content_hash": "a1b2c3d4...",
+  "is_active": true,
+  "description": "Core decision prompt for trading signals",
+  "created_at": "2024-01-15T10:00:00Z"
+}
+```
+
+### Create Prompt
+
+```
+POST /prompts
+```
+
+**Scope**: `lens:admin`
+
+**Request Body**:
+```json
+{
+  "name": "core_decision",
+  "version": "v2",
+  "prompt_type": "core",
+  "content": "# Trading Signal Decision Framework v2...",
+  "description": "Updated core decision prompt"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | **Yes** | Prompt name |
+| `version` | string | **Yes** | Version string |
+| `prompt_type` | string | **Yes** | `core` or `wrapper` |
+| `content` | string | **Yes** | Prompt content |
+| `model_name` | string | Conditional | Required for wrapper prompts |
+| `description` | string | No | Optional description |
+
+**Response** `201 Created`:
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440001",
+  "name": "core_decision",
+  "version": "v2",
+  "prompt_type": "core",
+  "model_name": null,
+  "content": "# Trading Signal Decision Framework v2...",
+  "content_hash": "e5f6g7h8...",
+  "is_active": true,
+  "description": "Updated core decision prompt",
+  "created_at": "2024-01-15T12:00:00Z"
+}
+```
+
+### Update Prompt
+
+```
+PUT /prompts/{name}/{version}
+```
+
+**Scope**: `lens:admin`
+
+**Request Body**:
+```json
+{
+  "content": "# Updated prompt content...",
+  "description": "Updated description"
+}
+```
+
+### Partial Update Prompt
+
+```
+PATCH /prompts/{name}/{version}
+```
+
+**Scope**: `lens:admin`
+
+Partially update a prompt (e.g., activate/deactivate).
+
+**Request Body**:
+```json
+{
+  "is_active": false
+}
+```
+
+### Delete Prompt
+
+```
+DELETE /prompts/{name}/{version}
+```
+
+**Scope**: `lens:admin`
+
+**Response** `204 No Content`
+
+### Render Prompt
+
+Render a complete prompt with enriched event data and constraints. Useful for testing prompts before deployment.
+
+```
+POST /prompts/render
+```
+
+**Scope**: `lens:admin`
+
+**Request Body**:
+```json
+{
+  "model_name": "chatgpt",
+  "enriched_event": {
+    "symbol": "BTC",
+    "signal_direction": "long",
+    "entry_price": 42000.50
+  },
+  "constraints": {
+    "max_position_size_pct": 25,
+    "min_hold_minutes": 15
+  },
+  "core_version": "v1",
+  "wrapper_version": "v1"
+}
+```
+
+**Response** `200 OK`:
+```json
+{
+  "rendered_prompt": "# Trading Signal Decision...\n\n## Event Data\n{...}",
+  "prompt_version": "chatgpt_v1_core_v1",
+  "prompt_hash": "a1b2c3d4e5f6..."
+}
+```
+
+---
+
 ## Dead Letter Queue (DLQ)
 
 ### List DLQ Entries
@@ -437,6 +920,8 @@ Query failed processing entries.
 ```
 GET /dlq
 ```
+
+**Scope**: `lens:read`
 
 **Query Parameters**:
 | Parameter | Type | Default | Description |
@@ -479,6 +964,8 @@ Get full details of a DLQ entry including payload.
 GET /dlq/{dlq_id}
 ```
 
+**Scope**: `lens:read`
+
 **Response** `200 OK`:
 ```json
 {
@@ -508,6 +995,8 @@ Re-enqueue a failed entry for processing.
 POST /dlq/{dlq_id}/retry
 ```
 
+**Scope**: `lens:admin`
+
 **Response** `200 OK`:
 ```json
 {
@@ -533,6 +1022,8 @@ Mark an entry as manually resolved.
 POST /dlq/{dlq_id}/resolve
 ```
 
+**Scope**: `lens:admin`
+
 **Request Body**:
 ```json
 {
@@ -556,7 +1047,8 @@ POST /dlq/{dlq_id}/resolve
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
 | `VALIDATION_ERROR` | 400 | Invalid request body or parameters |
-| `FORBIDDEN` | 403 | Access denied (external network) |
+| `UNAUTHORIZED` | 401 | No valid token provided |
+| `FORBIDDEN` | 403 | Insufficient permissions or external network access |
 | `NOT_FOUND` | 404 | Resource not found |
 | `RATE_LIMITED` | 429 | Rate limit exceeded |
 | `INTERNAL_ERROR` | 500 | Internal server error |

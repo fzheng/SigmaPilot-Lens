@@ -36,6 +36,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.auth import AuthContext, require_submit
 from src.core.config import settings
 from src.core.rate_limit import get_rate_limiter
 from src.models.database import get_db_session
@@ -98,7 +99,8 @@ async def submit_signal(
     response: Response,
     request: Request,
     idempotency_key: Annotated[Optional[str], Header(alias="X-Idempotency-Key")] = None,
-    _: None = Depends(check_rate_limit),
+    _rate_limit: None = Depends(check_rate_limit),
+    _auth: AuthContext = Depends(require_submit),
 ):
     """
     Submit a trading signal for analysis.

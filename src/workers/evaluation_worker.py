@@ -9,11 +9,11 @@ Features:
     - Per-model error isolation (one failure doesn't block others)
     - Token usage tracking
     - Prompt version tracking
+    - Runtime LLM configuration via database (API key management without restart)
 
 Configuration:
-    AI_MODELS: Comma-separated list of models to use (e.g., "chatgpt,gemini,claude")
-    USE_REAL_AI: Set to true for real AI evaluation, false for stub mode (default: false)
-    MODEL_{NAME}_*: Per-model configuration (API_KEY, MODEL_ID, TIMEOUT_MS, etc.)
+    USE_REAL_AI: Set to true for real AI evaluation, false for stub mode
+    LLM configs: Managed via /api/v1/llm-configs endpoints or env vars (legacy)
 
 Usage:
     worker = EvaluationWorker(redis_client, "worker-1")
@@ -41,7 +41,8 @@ from src.services.evaluation.models import (
     normalize_decision_output,
     validate_decision_output,
 )
-from src.services.evaluation.prompt_loader import get_prompt_for_model
+from src.services.llm_config import get_llm_config_service
+from src.services.prompt import get_prompt_service
 from src.services.publisher.publisher import publisher
 from src.services.queue import QueueConsumer, RedisClient
 
@@ -81,18 +82,26 @@ class EvaluationWorker(QueueConsumer):
         )
         self._adapters: Dict[str, BaseModelAdapter] = {}
 
-    def _get_adapter(self, model_name: str) -> Optional[BaseModelAdapter]:
+    async def _get_adapter(self, model_name: str) -> Optional[BaseModelAdapter]:
         """Get or create adapter for a model (lazy initialization).
+
+        Fetches configuration from LLM config service (database-backed with caching)
+        and creates adapter. Falls back to environment variables if not in database.
 
         Args:
             model_name: Name of the model (e.g., 'chatgpt')
 
         Returns:
-            Model adapter or None if creation fails
+            Model adapter or None if creation fails or model not configured
         """
         if model_name not in self._adapters:
             try:
-                adapter = create_adapter(model_name)
+                # Get config from LLM config service (database-backed)
+                llm_service = get_llm_config_service()
+                config = await llm_service.get_config(model_name)
+
+                # Create adapter with config (or fall back to env vars if None)
+                adapter = create_adapter(model_name, config)
                 if adapter.is_configured:
                     self._adapters[model_name] = adapter
                     logger.info(f"Initialized adapter for {model_name}")
@@ -121,8 +130,14 @@ class EvaluationWorker(QueueConsumer):
         log_stage(logger, "EVALUATION", event_id, status="started")
 
         try:
-            # Get models to evaluate
-            models = settings.ai_models_list
+            # Get enabled models from LLM config service (database-backed)
+            llm_service = get_llm_config_service()
+            models = await llm_service.get_enabled_models()
+
+            if not models:
+                # Fall back to settings if no models configured in database
+                models = settings.ai_models_list
+                logger.debug("No models in database, using settings.ai_models_list")
 
             if settings.use_real_ai:
                 # Parallel evaluation with real AI models
@@ -258,15 +273,16 @@ class EvaluationWorker(QueueConsumer):
         start_time = time.time()
 
         try:
-            # Get adapter
-            adapter = self._get_adapter(model_name)
+            # Get adapter (async - fetches config from database)
+            adapter = await self._get_adapter(model_name)
             if adapter is None:
                 logger.warning(f"No adapter available for {model_name}, skipping")
                 return None
 
-            # Render prompt
+            # Render prompt using database-backed prompt service
             constraints = payload.get("constraints", {})
-            prompt, prompt_version, prompt_hash = get_prompt_for_model(
+            prompt_service = get_prompt_service()
+            prompt, prompt_version, prompt_hash = await prompt_service.render_prompt(
                 model_name=model_name,
                 enriched_event=payload,
                 constraints=constraints,

@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from src.api.v1 import decisions, dlq, events, health, signals, ws
+from src.api.v1 import decisions, dlq, events, health, llm_configs, prompts, signals, ws
 
 api_router = APIRouter()
 
@@ -14,4 +14,6 @@ api_router.include_router(signals.router, prefix="/signals", tags=["Signals"])
 api_router.include_router(events.router, prefix="/events", tags=["Events"])
 api_router.include_router(decisions.router, prefix="/decisions", tags=["Decisions"])
 api_router.include_router(dlq.router, prefix="/dlq", tags=["DLQ"])
+api_router.include_router(llm_configs.router, prefix="/llm-configs", tags=["LLM Configs"])
+api_router.include_router(prompts.router, prefix="/prompts", tags=["Prompts"])
 api_router.include_router(ws.router, prefix="/ws", tags=["WebSocket"])

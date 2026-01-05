@@ -12,6 +12,8 @@ from src.core.rate_limit import init_rate_limiter
 from src.models.database import close_db, init_db
 from src.observability.logging import get_logger, setup_logging
 from src.observability.metrics import metrics
+from src.services.llm_config import get_llm_config_service
+from src.services.prompt import get_prompt_service
 from src.services.queue import close_redis_client, get_redis_client, init_redis_client, reset_queue_producer
 
 logger = get_logger(__name__)
@@ -36,15 +38,27 @@ async def lifespan(app: FastAPI):
     await init_rate_limiter(get_redis_client())
     logger.info(f"Rate limiter initialized (enabled={settings.RATE_LIMIT_ENABLED}, limit={settings.RATE_LIMIT_PER_MIN}/min)")
 
+    # Initialize LLM config service (loads from database)
+    llm_config_service = get_llm_config_service()
+    await llm_config_service.initialize()
+    enabled_models = await llm_config_service.get_enabled_models()
+    logger.info(f"LLM config service initialized, enabled models: {enabled_models}")
+
+    # Initialize prompt service (loads from database, seeds from files if empty)
+    prompt_service = get_prompt_service()
+    await prompt_service.initialize()
+    available_prompts = await prompt_service.get_available_prompts()
+    logger.info(f"Prompt service initialized, available: {available_prompts}")
+
     # Set application info metrics
     metrics.set_app_info(
         version="0.1.0",
         feature_profile=settings.FEATURE_PROFILE,
-        ai_models=settings.AI_MODELS,
+        ai_models=",".join(enabled_models) if enabled_models else "none",
     )
 
     logger.info(f"Feature profile: {settings.FEATURE_PROFILE}")
-    logger.info(f"AI models: {settings.ai_models_list}")
+    logger.info(f"AI models (enabled): {enabled_models}")
     logger.info(f"WebSocket enabled: {settings.WS_ENABLED}")
 
     yield
